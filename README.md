@@ -1,70 +1,48 @@
-# vscode-anime-assistent README
+# Airi Monitor (vscode-anime-assistent)
 
-This is the README for your extension "vscode-anime-assistent". After writing up a brief description, we recommend including the following sections.
+一个 VS Code 扩展，在编辑器侧边栏中陪伴你写代码的二次元傲娇助手 **Airi（愛莉）**。
 
-## Features
+## 功能
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- **实时 Bug 检测** — 监控 C/C++/Python 文件的编译错误，Airi 会用傲娇的语气提醒你
+- **聊天式交互** — 对话气泡界面，像 QQ 聊天一样，不是冷冰冰的 CLI 输出
+- **傲娇人格** — 嘴上吐槽你代码写得烂，但其实很关心你有没有修好 bug
+- **智能回复** — 支持 DeepSeek API（可选）或本地语料库
 
-For example if there is an image subfolder under your extension project workspace:
+## 使用方式
 
-\!\[feature X\]\(images/feature-x.png\)
+1. 安装扩展后，VSCode 启动时自动激活
+2. 在侧边栏打开 "Airi Assistant" 面板（`Ctrl+Shift+P` → `Open Anime Assistant`）
+3. 写代码时如果出现编译错误，Airi 会自动弹出聊天消息提醒你
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## 配置
 
-## Requirements
+| 环境变量 | 说明 | 默认 |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | DeepSeek API 密钥（可选） | 未设置 → 使用本地语料库 |
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+## 开发
 
-## Extension Settings
+```bash
+npm install
+npm run compile    # 编译 TypeScript
+npm run watch      # 监听模式
+npm test           # 运行测试
+```
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+## 项目结构
 
-For example:
+```
+├── src/extension.ts          # VS Code 扩展入口
+├── python_backend/           # Python 后端
+│   ├── main.py               # 消息路由入口
+│   ├── character.py          # 角色人格定义
+│   ├── corpus.py             # 本地傲娇语料库
+│   ├── response_generator.py # 回复生成器
+│   └── requirements.txt      # Python 依赖
+└── out/                      # 编译产物
+```
 
-This extension contributes the following settings:
+## License
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+MIT

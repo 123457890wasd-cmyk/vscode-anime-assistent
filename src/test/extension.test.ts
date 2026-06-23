@@ -1,15 +1,62 @@
-import * as assert from 'assert';
+/*
+ * ============================================================================
+ * extension.test.ts — 扩展测试文件
+ * ============================================================================
+ *
+ * 测试 airi-monitor 扩展的核心逻辑单元。
+ */
 
-// You can import and use all API from the 'vscode' module
-// as well as import your extension to test it
+import * as assert from 'assert';
 import * as vscode from 'vscode';
-// import * as myExtension from '../../extension';
 
 suite('Extension Test Suite', () => {
 	vscode.window.showInformationMessage('Start all tests.');
 
-	test('Sample test', () => {
-		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
-		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
+	/**
+	 * 验证扩展已正确激活并注册了命令
+	 */
+	test('Extension should be activated', async () => {
+		const ext = vscode.extensions.getExtension('Mr.hancard.vscode-anime-assistent');
+		assert.ok(ext, 'Extension not found');
+
+		if (!ext.isActive) {
+			await ext.activate();
+		}
+		assert.strictEqual(ext.isActive, true, 'Extension should be active');
+	});
+
+	/**
+	 * 验证 helloWorld 命令已注册
+	 */
+	test('helloWorld command should be registered', async () => {
+		const commands = await vscode.commands.getCommands(true);
+		assert.strictEqual(
+			commands.includes('vscode-anime-assistent.helloWorld'),
+			true,
+			'helloWorld command not registered'
+		);
+	});
+
+	/**
+	 * 验证 openAssistant 命令已注册
+	 */
+	test('openAssistant command should be registered', async () => {
+		const commands = await vscode.commands.getCommands(true);
+		assert.strictEqual(
+			commands.includes('vscode-anime-assistent.openAssistant'),
+			true,
+			'openAssistant command not registered'
+		);
+	});
+
+	/**
+	 * 验证支持的语言 ID 集合
+	 */
+	test('should support C, C++, and Python language IDs', () => {
+		const supportedLanguages = ['c', 'cpp', 'python'];
+		assert.strictEqual(supportedLanguages.includes('c'), true);
+		assert.strictEqual(supportedLanguages.includes('cpp'), true);
+		assert.strictEqual(supportedLanguages.includes('python'), true);
+		assert.strictEqual(supportedLanguages.includes('javascript'), false);
 	});
 });

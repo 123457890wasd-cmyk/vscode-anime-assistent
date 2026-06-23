@@ -9,13 +9,19 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "vscode-anime-assistent.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "vscode-anime-assistent.openAssistant",
+        "title": "Open Anime Assistant"
       }
     ]
   },
