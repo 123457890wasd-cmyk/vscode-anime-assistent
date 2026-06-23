@@ -232,7 +232,10 @@ function startPythonBackend(context: vscode.ExtensionContext): void {
 	const scriptPath = path.join(context.extensionPath, 'python_backend', 'main.py');
 
 	// 使用 child_process.spawn 启动子进程，'pipe' 选项启用 stdin/stdout/stderr 管道
-	pyProcess = cp.spawn(pythonPath, [scriptPath], { stdio: 'pipe' });
+	pyProcess = cp.spawn(pythonPath, [scriptPath], {
+		stdio: 'pipe',
+		env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+	});
 
 	// 验证管道是否都成功建立。如果系统资源不足或配置问题，管道可能为 null
 	if (!pyProcess.stdout || !pyProcess.stderr || !pyProcess.stdin) {

@@ -28,6 +28,13 @@ import sys
 import json
 import os
 
+# 确保能导入同目录下的模块（Node.js spawn 的 CWD 可能不是此脚本所在目录）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# 强制 stdout/stderr 使用 UTF-8 编码（Windows 默认 gbk 会导致乱码）
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
 from character import CHARACTER_NAME
 from response_generator import generate_response, pick_corpus
 
