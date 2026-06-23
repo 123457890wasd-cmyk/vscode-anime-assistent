@@ -614,7 +614,7 @@ function normalizeDiagnosticCode(
  * @returns 完整的 HTML 文档字符串
  */
 function getWebviewHtml(): string {
-	return `<!DOCTYPE html>
+		return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -623,16 +623,15 @@ function getWebviewHtml(): string {
     :root {
       color-scheme: dark;
       --bg: #1a1a2e;
-      --surface: #16213e;
-      --bubble: #1f2b47;
       --text: #e8e8e8;
       --muted: #8888aa;
       --accent: #ff6b9d;
       --accent-dim: #c04a78;
+      --error-bg: rgba(255,71,87,0.12);
       --error-border: #ff4757;
-      --error-bubble: rgba(255,71,87,0.08);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
       font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
       background: var(--bg);
@@ -640,190 +639,219 @@ function getWebviewHtml(): string {
       height: 100vh;
       display: flex;
       flex-direction: column;
-      overflow: hidden;
-    }
-
-    /* ===== 顶部状态栏 ===== */
-    .topbar {
-      display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      background: var(--surface);
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-      flex-shrink: 0;
-    }
-    .topbar .name {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--accent);
-    }
-    .topbar .dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: #4ade80;
-      box-shadow: 0 0 6px #4ade80;
-      flex-shrink: 0;
-    }
-    .topbar .dot.offline { background: #666; box-shadow: none; }
-    .topbar .status-text {
-      font-size: 11px;
-      color: var(--muted);
-      margin-left: auto;
+      justify-content: flex-end;
+      overflow: hidden;
+      padding: 8px;
     }
 
-    /* ===== 消息列表区 ===== */
-    .chat {
-      flex: 1;
-      overflow-y: auto;
-      padding: 12px 10px;
+    /* ===== 气泡区域 ===== */
+    .bubble-area {
+      width: 100%;
+      max-width: 280px;
+      display: flex;
+      flex-direction: column-reverse;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 10px;
+      min-height: 0;
+    }
+
+    /* ===== 聊天气泡（QQ桌宠风格） ===== */
+    .bubble {
+      position: relative;
+      max-width: 100%;
+      padding: 10px 14px;
+      border-radius: 16px;
+      background: #1f2b47;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      text-align: center;
+      animation: popUp 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    }
+    /* 气泡下方的小三角 */
+    .bubble::after {
+      content: '';
+      position: absolute;
+      bottom: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-top: 8px solid #1f2b47;
+    }
+
+    /* 错误气泡 */
+    .bubble.error {
+      background: var(--error-bg);
+      border: 1px solid var(--error-border);
+      box-shadow: 0 2px 16px rgba(255,71,87,0.2);
+    }
+    .bubble.error::after {
+      border-top-color: var(--error-border);
+    }
+
+    /* 旧气泡半透明 */
+    .bubble.old {
+      opacity: 0.55;
+      transform: scale(0.9);
+      transition: all 0.4s ease;
+    }
+
+    @keyframes popUp {
+      from { opacity: 0; transform: translateY(12px) scale(0.85); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* ===== 桌宠角色区 ===== */
+    .pet-area {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      align-items: center;
+      gap: 4px;
+      cursor: default;
+      user-select: none;
     }
-    .chat::-webkit-scrollbar { width: 4px; }
-    .chat::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
-
-    /* ===== 系统消息（居中，小字） ===== */
-    .sys-msg {
-      text-align: center;
-      font-size: 11px;
-      color: var(--muted);
-      padding: 4px 0;
-      opacity: 0.7;
-    }
-
-    /* ===== 聊天气泡（Airi 消息，靠左） ===== */
-    .msg-row {
-      display: flex;
-      align-items: flex-end;
-      gap: 6px;
-      animation: popIn 0.3s ease-out;
-    }
-    @keyframes popIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-    .msg-row .avatar-placeholder {
-      width: 28px; height: 28px;
+    /* 头像：圆形，支持自定义图片 */
+    .avatar {
+      width: 64px; height: 64px;
       border-radius: 50%;
       background: linear-gradient(135deg, var(--accent), var(--accent-dim));
-      flex-shrink: 0;
-      font-size: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+      box-shadow: 0 0 24px rgba(255,107,157,0.35);
+      transition: transform 0.2s ease;
+      animation: idleBounce 3s infinite ease-in-out;
+      overflow: hidden;
+      border: 2px solid var(--accent);
     }
-    .bubble {
-      max-width: 82%;
-      padding: 10px 14px;
-      border-radius: 16px 16px 16px 4px;
-      background: var(--bubble);
-      font-size: 13px;
-      line-height: 1.55;
-      white-space: pre-wrap;
-      word-break: break-word;
+    /* 当设置了自定义图片时使用 img 标签 */
+    .avatar img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      border-radius: 50%;
     }
-    /* 错误类气泡：左边粉红边框 */
-    .bubble.error {
-      border-left: 3px solid var(--error-border);
-      background: var(--error-bubble);
+    .avatar:active {
+      transform: scale(0.9);
     }
-    .bubble .ts {
+    @keyframes idleBounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-5px); }
+    }
+    .pet-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 2px;
+    }
+    .pet-status {
       font-size: 10px;
       color: var(--muted);
-      display: block;
-      margin-top: 4px;
     }
-
-    /* ===== 打字指示器 ===== */
-    .typing {
-      display: none;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 0 8px 34px;
-    }
-    .typing.show { display: flex; }
-    .typing span {
+    .pet-status .dot {
+      display: inline-block;
       width: 6px; height: 6px;
       border-radius: 50%;
-      background: var(--muted);
-      animation: bounce 1.2s infinite ease-in-out;
+      background: #4ade80;
+      margin-right: 4px;
+      vertical-align: middle;
     }
-    .typing span:nth-child(2) { animation-delay: 0.2s; }
-    .typing span:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes bounce {
+    .pet-status .dot.offline { background: #666; }
+
+    /* ===== 打字动画 ===== */
+    .typing-dots {
+      display: none;
+      gap: 4px;
+      padding: 4px 0;
+      justify-content: center;
+    }
+    .typing-dots.show { display: flex; }
+    .typing-dots span {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: dotBounce 1.2s infinite ease-in-out;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes dotBounce {
       0%, 80%, 100% { transform: translateY(0); }
-      40% { transform: translateY(-6px); }
+      40% { transform: translateY(-5px); }
     }
   </style>
 </head>
 <body>
-  <!-- 顶部状态栏 -->
-  <div class="topbar">
-    <span class="name">Airi</span>
-    <span class="dot" id="dot"></span>
-    <span class="status-text" id="statusLabel">online</span>
-  </div>
 
-  <!-- 聊天消息区 -->
-  <div class="chat" id="chat">
-    <div class="sys-msg">— Airi 已上线 —</div>
-  </div>
+  <!-- 气泡展示区 -->
+  <div class="bubble-area" id="bubbleArea"></div>
 
-  <!-- 打字指示器 -->
-  <div class="typing" id="typing">
+  <!-- 打字动画 -->
+  <div class="typing-dots" id="typing">
     <span></span><span></span><span></span>
+  </div>
+
+  <!-- 桌宠角色 -->
+  <div class="pet-area">
+    <div class="avatar" id="avatar" title="戳戳 Airi">
+      <!-- 默认文字头像，替换为 <img src="..."> 即可自定义 -->
+      A
+    </div>
+    <div class="pet-name">Airi</div>
+    <div class="pet-status">
+      <span class="dot" id="dot"></span><span id="statusLabel">online</span>
+    </div>
   </div>
 
   <script>
     const vscode = acquireVsCodeApi();
-    const chatEl = document.getElementById('chat');
+    const bubbleArea = document.getElementById('bubbleArea');
+    const typingEl = document.getElementById('typing');
     const dotEl = document.getElementById('dot');
     const statusLabel = document.getElementById('statusLabel');
-    const typingEl = document.getElementById('typing');
+    const avatarEl = document.getElementById('avatar');
 
-    function scrollBottom() {
-      chatEl.scrollTop = chatEl.scrollHeight;
+    const MAX_BUBBLES = 3;
+
+    /** 移除最旧的气泡 */
+    function pruneBubbles() {
+      const bubbles = bubbleArea.querySelectorAll('.bubble');
+      if (bubbles.length >= MAX_BUBBLES) {
+        const oldest = bubbles[0];
+        oldest.style.opacity = '0';
+        oldest.style.transform = 'translateY(-10px) scale(0.8)';
+        oldest.style.transition = 'all 0.3s ease';
+        setTimeout(function() { oldest.remove(); }, 300);
+      }
+      if (bubbles.length >= 2) {
+        bubbles[bubbles.length - 2].classList.add('old');
+      }
     }
 
-    /** 追加一条系统消息 */
-    function addSysMsg(text) {
-      const el = document.createElement('div');
-      el.className = 'sys-msg';
+    /** 弹出新气泡 */
+    function showBubble(text, isError) {
+      pruneBubbles();
+      var el = document.createElement('div');
+      el.className = isError ? 'bubble error' : 'bubble';
       el.textContent = text;
-      chatEl.appendChild(el);
-      scrollBottom();
-    }
+      bubbleArea.appendChild(el);
 
-    /** 追加一条 Airi 聊天气泡 */
-    function addBubble(text, isError) {
-      const row = document.createElement('div');
-      row.className = 'msg-row';
-
-      const avatar = document.createElement('div');
-      avatar.className = 'avatar-placeholder';
-      avatar.textContent = 'A';
-
-      const bubble = document.createElement('div');
-      bubble.className = isError ? 'bubble error' : 'bubble';
-      bubble.textContent = text;
-
-      const ts = document.createElement('span');
-      ts.className = 'ts';
-      ts.textContent = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-      bubble.appendChild(ts);
-
-      row.appendChild(avatar);
-      row.appendChild(bubble);
-      chatEl.appendChild(row);
-      scrollBottom();
+      // 轻推一下桌宠
+      avatarEl.style.animation = 'none';
+      avatarEl.offsetHeight;
+      avatarEl.style.animation = 'idleBounce 3s infinite ease-in-out';
     }
 
     /** 显示/隐藏打字指示器 */
     function showTyping(show) {
       typingEl.classList.toggle('show', show);
-      if (show) scrollBottom();
     }
 
     /** 更新在线状态 */
@@ -833,61 +861,53 @@ function getWebviewHtml(): string {
     }
 
     window.addEventListener('message', function (event) {
-      const msg = event.data;
+      var msg = event.data;
       if (!msg || !msg.type) return;
 
       switch (msg.type) {
-
-        // --- Airi 聊天消息 ---
         case 'chatMessage':
-          addBubble(msg.payload.text || '', false);
+          showBubble(msg.payload.text || '', false);
           break;
 
-        // --- 错误提醒（特殊气泡样式） ---
         case 'errorAlert':
-          addBubble(msg.payload.text || '', true);
+          showBubble(msg.payload.text || '', true);
           break;
 
-        // --- 状态变更 ---
         case 'statusChange':
-          addSysMsg(msg.payload.text || '');
           break;
 
-        // --- 后端退出 ---
         case 'backendExit':
           setOnline(false);
-          addSysMsg('— Airi 已离线 —');
+          showBubble('Airi \u5df2\u79bb\u7ebf\u2026', true);
           break;
 
-        // --- Python 原始输出（兼容旧消息） ---
         case 'pythonMessage':
           if (msg.payload && msg.payload.message) {
-            addBubble(msg.payload.message, false);
+            showBubble(msg.payload.message, false);
           }
           break;
 
-        // --- 诊断消息（由后端处理后下发聊天消息） ---
         case 'diagnostics':
-          break;
-
-        // --- 心跳（静默） ---
         case 'heartbeat':
           break;
 
-        // --- Python 错误输出 ---
         case 'pythonError':
-          addSysMsg('[stderr] ' + (msg.payload?.message || ''));
           break;
 
-        // --- 同步响应 ---
         case 'sync':
           setOnline(msg.payload?.backendReady || false);
           break;
       }
     });
 
+    // 戳桌宠时回弹动画
+    avatarEl.addEventListener('click', function() {
+      avatarEl.style.transform = 'scale(0.85)';
+      setTimeout(function() { avatarEl.style.transform = 'scale(1)'; }, 120);
+    });
+
     vscode.postMessage({ type: 'requestSync' });
   </script>
 </body>
 </html>`;
-}
+	}
