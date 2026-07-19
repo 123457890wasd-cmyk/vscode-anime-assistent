@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    :root {
+      --accent: #ff6b9d;
+      --accent-dim: #c04a78;
+      --text: #e8e8e8;
+      --muted: #8888aa;
+      --error-border: #ff4757;
+      --hair: #f8a4c2;
+      --hair-dark: #e8789a;
+      --skin: #ffe4d0;
+      --eye: #5b3a6e;
+      --blush: #ffb3c1;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      user-select: none; -webkit-user-select: none;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 8px 8px 12px;
+    }
+
+    /* ===== 气泡区域 ===== */
+    .bubble-area {
+      width: 100%; max-width: 260px;
+      display: flex; flex-direction: column-reverse;
+      align-items: center; gap: 6px;
+      margin-bottom: 6px;
+      pointer-events: none;
+    }
+    .bubble {
+      position: relative; max-width: 100%;
+      padding: 7px 11px; border-radius: 13px;
+      background: rgba(31, 43, 71, 0.9);
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      font-size: 12px; line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word;
+      text-align: center;
+      animation: popUp 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+      pointer-events: auto;
+    }
+    .bubble::after {
+      content: ''; position: absolute; bottom: -7px; left: 50%;
+      transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-top: 7px solid rgba(31, 43, 71, 0.9);
+    }
+    .bubble.error {
+      background: rgba(255,71,87,0.18);
+      border: 1px solid var(--error-border);
+      box-shadow: 0 2px 16px rgba(255,71,87,0.25);
+    }
+    .bubble.error::after { border-top-color: var(--error-border); }
+    .bubble.old { opacity: 0.5; transform: scale(0.9); transition: all 0.4s ease; }
+    @keyframes popUp {
+      from { opacity: 0; transform: translateY(12px) scale(0.85); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* ===== 角色立绘区（拖拽手柄） ===== */
+    .character-wrapper {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 2px;
+      cursor: grab; padding: 6px;
+      border-radius: 16px; transition: background 0.2s;
+    }
+    .character-wrapper:active { cursor: grabbing; }
+    .character-wrapper:hover { background: rgba(255,107,157,0.06); }
+
+    /* 角色容器 */
+    .character-box {
+      width: 160px; height: 210px;
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+      animation: idleSway 4s infinite ease-in-out;
+    }
+    @keyframes idleSway {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      25% { transform: translateY(-3px) rotate(0.5deg); }
+      75% { transform: translateY(-2px) rotate(-0.5deg); }
+    }
+
+    /* 自定义图片 */
+    .character-box img {
+      max-width: 100%; max-height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+    }
+
+    /* ===== CSS 默认角色 ===== */
+    .css-character { display: none; }
+    .css-character.visible { display: block; }
+
+    /* 身体 */
+    .chibi-body {
+      position: absolute; bottom: 10px; left: 50%;
+      transform: translateX(-50%);
+      width: 50px; height: 55px;
+      background: linear-gradient(180deg, #f8e0f0 0%, #e8d0e8 100%);
+      border-radius: 20px 20px 25px 25px;
+      border: 1.5px solid #d8b8d8;
+    }
+    /* 领结 */
+    .chibi-body::after {
+      content: ''; position: absolute; top: 8px; left: 50%;
+      transform: translateX(-50%);
+      width: 16px; height: 8px;
+      background: var(--accent);
+      border-radius: 4px;
+    }
+
+    /* 头部 */
+    .chibi-head {
+      position: absolute; bottom: 55px; left: 50%;
+      transform: translateX(-50%);
+      width: 68px; height: 78px;
+      background: var(--skin);
+      border-radius: 35px 35px 30px 30px;
+      border: 1.5px solid #e8c8b8;
+    }
+    /* 头发 */
+    .chibi-hair {
+      position: absolute; bottom: 52px; left: 50%;
+      transform: translateX(-50%);
+      width: 74px; height: 60px;
+      background: linear-gradient(180deg, var(--hair-dark) 0%, var(--hair) 40%, var(--hair-dark) 100%);
+      border-radius: 40px 40px 8px 8px;
+    }
+    /* 刘海 */
+    .chibi-bangs {
+      position: absolute; top: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 60px; height: 30px;
+      background: var(--hair-dark);
+      border-radius: 0 0 20px 20px;
+    }
+    /* 眼睛 */
+    .chibi-eye {
+      position: absolute; width: 18px; height: 20px;
+      background: #fff; border-radius: 50%;
+      border: 2px solid var(--eye);
+      top: 28px;
+    }
+    .chibi-eye.left { left: 14px; }
+    .chibi-eye.right { right: 14px; }
+    .chibi-eye::after {
+      content: ''; position: absolute;
+      width: 10px; height: 12px;
+      background: var(--eye); border-radius: 50%;
+      top: 3px; left: 50%; transform: translateX(-50%);
+    }
+    /* 眼睛高光 */
+    .chibi-eye::before {
+      content: ''; position: absolute;
+      width: 4px; height: 4px;
+      background: #fff; border-radius: 50%;
+      top: 2px; left: 3px; z-index: 2;
+    }
+    /* 腮红 */
+    .chibi-blush {
+      position: absolute; width: 12px; height: 7px;
+      background: var(--blush); border-radius: 50%;
+      top: 43px; opacity: 0.7;
+    }
+    .chibi-blush.left { left: 6px; }
+    .chibi-blush.right { right: 6px; }
+    /* 嘴 */
+    .chibi-mouth {
+      position: absolute; width: 8px; height: 4px;
+      border-bottom: 2px solid #d4787a;
+      border-radius: 0 0 8px 8px;
+      top: 50px; left: 50%; transform: translateX(-50%);
+    }
+
+    /* ===== CSS 情绪变体（通过 data-emotion 切换） ===== */
+
+    /* angry: 眉头倒竖 + 嘴巴变尖 */
+    .character-box[data-emotion="angry"] .chibi-mouth {
+      width: 6px; height: 5px;
+      border-bottom: none;
+      border-left: 3px solid transparent;
+      border-right: 3px solid transparent;
+      border-top: 5px solid #d4787a;
+      border-radius: 2px;
+      top: 49px;
+    }
+    .angry-brow { display: none; }
+    .character-box[data-emotion="angry"] .angry-brow {
+      display: block; position: absolute;
+      width: 14px; height: 2.5px; background: var(--eye);
+      border-radius: 1px; top: 22px;
+    }
+    .character-box[data-emotion="angry"] .angry-brow.left {
+      left: 10px; transform: rotate(-15deg);
+    }
+    .character-box[data-emotion="angry"] .angry-brow.right {
+      right: 10px; transform: rotate(15deg);
+    }
+    /* angry 青筋 */
+    .angry-vein { display: none; }
+    .character-box[data-emotion="angry"] .angry-vein {
+      display: block; position: absolute;
+      font-size: 14px; top: 8px; right: 30px;
+      color: #ff4757;
+    }
+
+    /* happy: 嘴巴张开微笑 + 腮红更大 */
+    .character-box[data-emotion="happy"] .chibi-mouth {
+      width: 10px; height: 5px;
+      border-bottom: 2px solid #e8788a;
+      border-radius: 0 0 10px 10px;
+      top: 50px;
+    }
+    .character-box[data-emotion="happy"] .chibi-blush {
+      width: 15px; height: 9px; opacity: 0.85;
+    }
+    /* happy 星星眼 */
+    .character-box[data-emotion="happy"] .chibi-eye::after {
+      background: #e8789a;
+    }
+
+    /* surprised: 大眼睛 + 圆嘴 */
+    .character-box[data-emotion="surprised"] .chibi-eye {
+      width: 21px; height: 23px;
+    }
+    .character-box[data-emotion="surprised"] .chibi-eye::after {
+      width: 8px; height: 10px; top: 5px;
+    }
+    .character-box[data-emotion="surprised"] .chibi-mouth {
+      width: 10px; height: 9px;
+      border: 2px solid #d4787a;
+      border-radius: 50%;
+      background: #e8788a;
+      top: 48px;
+    }
+
+    /* greeting: 微妙笑容 */
+    .character-box[data-emotion="greeting"] .chibi-mouth {
+      width: 9px; height: 4px;
+      border-bottom: 2px solid #d89098;
+      border-radius: 0 0 9px 9px;
+      top: 49px;
+    }
+
+    /* 情绪切换过渡 */
+    .character-box .chibi-eye,
+    .character-box .chibi-mouth,
+    .character-box .chibi-blush {
+      transition: all 0.3s ease;
+    }
+
+    /* ===== 名字和状态 ===== */
+    .pet-name {
+      font-size: 13px; font-weight: 600;
+      color: var(--accent); letter-spacing: 3px;
+      text-shadow: 0 0 10px rgba(255,107,157,0.5);
+      margin-top: -2px;
+    }
+    .pet-status {
+      font-size: 10px; color: var(--muted);
+    }
+    .pet-status .dot {
+      display: inline-block; width: 6px; height: 6px;
+      border-radius: 50%; background: #4ade80;
+      margin-right: 4px; vertical-align: middle;
+      box-shadow: 0 0 6px rgba(74,222,128,0.6);
+    }
+    .pet-status .dot.offline { background: #666; box-shadow: none; }
+
+    /* ===== 右键菜单 ===== */
+    .context-menu {
+      display: none; position: fixed;
+      background: rgba(26, 26, 46, 0.96);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,107,157,0.3);
+      border-radius: 8px; padding: 4px 0;
+      min-width: 110px; z-index: 999;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+    .context-menu.show { display: block; }
+    .context-menu .menu-item {
+      padding: 6px 14px; font-size: 12px;
+      cursor: pointer; color: var(--text);
+      transition: background 0.15s;
+    }
+    .context-menu .menu-item:hover {
+      background: rgba(255,107,157,0.2);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 气泡展示区 -->
+  <div class="bubble-area" id="bubbleArea"></div>
+
+  <!-- 角色立绘区（拖拽手柄） -->
+  <div class="character-wrapper" id="petArea">
+    <div class="character-box" id="charBox">
+      <!-- 自定义图片（优先级最高） -->
+      <img id="charImg" src="" alt="Airi" style="display:none" />
+      <!-- CSS 默认角色 -->
+      <div class="css-character visible" id="cssChar">
+        <div class="chibi-hair"></div>
+        <div class="chibi-bangs"></div>
+        <div class="chibi-head"></div>
+        <div class="chibi-eye left"></div>
+        <div class="chibi-eye right"></div>
+        <div class="angry-brow left"></div>
+        <div class="angry-brow right"></div>
+        <div class="angry-vein">💢</div>
+        <div class="chibi-blush left"></div>
+        <div class="chibi-blush right"></div>
+        <div class="chibi-mouth"></div>
+        <div class="chibi-body"></div>
+      </div>
+    </div>
+    <div class="pet-name">Airi</div>
+    <div class="pet-status">
+      <span class="dot" id="dot"></span><span id="statusLabel">connecting...</span>
+    </div>
+  </div>
+
+  <!-- 右键菜单 -->
+  <div class="context-menu" id="contextMenu">
+    <div class="menu-item" data-action="hide">隐藏 Airi</div>
+  </div>
+
+  <script>
+    var PORT = {{PORT}};
+    var CHAR_IMG = "{{CHARACTER_IMAGE}}";
+    var SSE_URL = 'http://127.0.0.1:' + PORT + '/events';
+    var EVENT_URL = 'http://127.0.0.1:' + PORT + '/event';
+
+    // DOM
+    var bubbleArea = document.getElementById('bubbleArea');
+    var charBox = document.getElementById('charBox');
+    var charImg = document.getElementById('charImg');
+    var cssChar = document.getElementById('cssChar');
+    var dotEl = document.getElementById('dot');
+    var statusLabel = document.getElementById('statusLabel');
+    var petArea = document.getElementById('petArea');
+    var contextMenu = document.getElementById('contextMenu');
+    var MAX_BUBBLES = 3;
+    var currentEmotion = 'idle';
+    var emotionTimer = null;
+
+    // ============ 情绪立绘切换 ============
+    // 图片命名：assets/character_angry.png, character_happy.png 等
+    // 找不到对应情绪图片时自动降级到基础图片或 CSS 角色
+    function setEmotion(emotion) {
+      if (!emotion || emotion === currentEmotion) return;
+      currentEmotion = emotion;
+      charBox.setAttribute('data-emotion', emotion);
+
+      // 尝试加载情绪对应图片
+      if (CHAR_IMG && CHAR_IMG.length > 0) {
+        var base = CHAR_IMG.replace(/(\.\w+)$/, '_' + emotion + '$1');
+        var testImg = new Image();
+        testImg.onload = function() {
+          charImg.src = base;
+          charImg.style.display = 'block';
+          cssChar.classList.remove('visible');
+        };
+        testImg.onerror = function() {
+          // 回退到基础图片
+          charImg.src = CHAR_IMG;
+          charImg.style.display = 'block';
+          cssChar.classList.remove('visible');
+        };
+        testImg.src = base;
+      }
+
+      // 8 秒后恢复默认表情（气泡已消失）
+      clearTimeout(emotionTimer);
+      emotionTimer = setTimeout(function() {
+        currentEmotion = 'idle';
+        charBox.setAttribute('data-emotion', 'idle');
+      }, 8000);
+    }
+
+    // ============ 自定义图片加载 ============
+    if (CHAR_IMG && CHAR_IMG.length > 0) {
+      charImg.onerror = function() {
+        charImg.style.display = 'none';
+        cssChar.classList.add('visible');
+      };
+      charImg.src = CHAR_IMG;
+      charImg.style.display = 'block';
+      cssChar.classList.remove('visible');
+    }
+
+    // ============ 气泡逻辑 ============
+    function pruneBubbles() {
+      var bubbles = bubbleArea.querySelectorAll('.bubble');
+      if (bubbles.length >= MAX_BUBBLES) {
+        var oldest = bubbles[0];
+        oldest.style.opacity = '0';
+        oldest.style.transform = 'translateY(-10px) scale(0.8)';
+        oldest.style.transition = 'all 0.3s ease';
+        setTimeout(function() { oldest.remove(); }, 300);
+      }
+      if (bubbles.length >= 2) {
+        bubbles[bubbles.length - 2].classList.add('old');
+      }
+    }
+
+    function showBubble(text, isError) {
+      pruneBubbles();
+      var el = document.createElement('div');
+      el.className = isError ? 'bubble error' : 'bubble';
+      el.textContent = text;
+      bubbleArea.appendChild(el);
+      // 轻推角色
+      charBox.style.animation = 'none';
+      charBox.offsetHeight;
+      charBox.style.animation = 'idleSway 4s infinite ease-in-out';
+    }
+
+    function setOnline(online) {
+      dotEl.classList.toggle('offline', !online);
+      statusLabel.textContent = online ? 'online' : 'offline';
+    }
+
+    // ============ SSE 连接 ============
+    function connectSSE() {
+      var es = new EventSource(SSE_URL);
+      es.onopen = function() {
+        setOnline(true);
+        fetch(EVENT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'desktopReady' }) }).catch(function() {});
+      };
+      es.onmessage = function(event) {
+        try {
+          var msg = JSON.parse(event.data);
+          if (!msg || !msg.type) return;
+          var emotion = (msg.payload && msg.payload.emotion) || 'idle';
+          switch (msg.type) {
+            case 'chatMessage': showBubble(msg.payload.text || '', false); setEmotion(emotion); break;
+            case 'errorAlert': showBubble(msg.payload.text || '', true); setEmotion(emotion || 'angry'); break;
+            case 'backendExit': setOnline(false); showBubble('Airi 已离线…', true); break;
+            case 'pythonMessage': if (msg.payload && msg.payload.message) { showBubble(msg.payload.message, false); setEmotion(emotion); } break;
+          }
+        } catch (e) {}
+      };
+      es.onerror = function() { setOnline(false); };
+      return es;
+    }
+
+    // ============ 拖拽移动 ============
+    var dragging = false, dragStartX = 0, dragStartY = 0, winStartX = 0, winStartY = 0;
+
+    petArea.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      dragging = true;
+      dragStartX = e.screenX; dragStartY = e.screenY;
+      winStartX = window.screenX || 0; winStartY = window.screenY || 0;
+      if (window.pywebview && window.pywebview.api) {
+        try {
+          var p = window.pywebview.api.get_position();
+          if (p && typeof p.then === 'function') {
+            p.then(function(pos) { winStartX = pos[0]; winStartY = pos[1]; }, function() {});
+          } else { winStartX = p[0] || winStartX; winStartY = p[1] || winStartY; }
+        } catch (err) {}
+      }
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', function(e) {
+      if (!dragging) return;
+      try {
+        if (window.pywebview && window.pywebview.api)
+          window.pywebview.api.move_window(winStartX + e.screenX - dragStartX, winStartY + e.screenY - dragStartY);
+      } catch (err) {}
+      e.preventDefault();
+    });
+
+    document.addEventListener('mouseup', function() { dragging = false; });
+
+    // ============ 右键菜单 ============
+    petArea.addEventListener('contextmenu', function(e) {
+      e.preventDefault();
+      contextMenu.style.left = e.clientX + 'px';
+      contextMenu.style.top = e.clientY + 'px';
+      contextMenu.classList.add('show');
+    });
+    document.addEventListener('click', function() { contextMenu.classList.remove('show'); });
+    contextMenu.addEventListener('click', function(e) {
+      var a = e.target.getAttribute('data-action');
+      if (a === 'hide') {
+        try { if (window.pywebview && window.pywebview.api) window.pywebview.api.hide_window(); } catch (err) {}
+      }
+      contextMenu.classList.remove('show');
+    });
+
+    // ============ 气泡自动消失 ============
+    setInterval(function() {
+      var bubbles = bubbleArea.querySelectorAll('.bubble'), now = Date.now();
+      bubbles.forEach(function(b) {
+        if (!b.dataset.created) b.dataset.created = now;
+        if (now - parseInt(b.dataset.created) > 8000 && !b.dataset.fading) {
+          b.dataset.fading = '1';
+          b.style.opacity = '0'; b.style.transition = 'opacity 1s ease';
+          setTimeout(function() { b.remove(); }, 1000);
+        }
+      });
+    }, 2000);
+
+    // ============ 启动 ============
+    connectSSE();
+  </script>
+</body>
+</html>

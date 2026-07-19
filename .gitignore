@@ -1,6 +1,29 @@
-out
-dist
-node_modules
-.vscode-test/
+﻿# VS Code / TypeScript
+out/
+dist/
+node_modules/
 *.vsix
+*.map
+
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+
+# 环境变量
+.env
+
+# 操作系统
+Thumbs.db
+Desktop.ini
+$null
+
+# 本地 VS Code 配置
+.vscode/c_cpp_properties.json
+
+# 临时文件
+*.tmp
+*.log
+temp_*/

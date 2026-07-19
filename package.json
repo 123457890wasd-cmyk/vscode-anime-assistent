@@ -1,8 +1,8 @@
-{
+﻿{
   "name": "vscode-anime-assistent",
   "displayName": "airi-monitor",
-  "description": "just_a_students_small_work",
-  "version": "0.0.1",
+  "description": "Anime desktop pet for VS Code — tsundere Airi watches your code and roasts your bugs",
+  "version": "0.2.0",
   "engines": {
     "vscode": "^1.110.0"
   },
@@ -22,6 +22,10 @@
       {
         "command": "vscode-anime-assistent.openAssistant",
         "title": "Open Anime Assistant"
+      },
+      {
+        "command": "vscode-anime-assistent.toggleDesktopPet",
+        "title": "Toggle Desktop Pet"
       }
     ]
   },
@@ -44,3 +48,4 @@
     "@vscode/test-electron": "^2.5.2"
   }
 }
+

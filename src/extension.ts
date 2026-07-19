@@ -18,6 +18,8 @@
  *         ├── 注册两个命令 (helloWorld, openAssistant)
  *         ├── 启动 Python 子进程 (python_backend/main.py)
  *         ├── 创建 Webview 面板 (Airi Assistant)
+ *         ├── 启动 HTTP SSE 服务器 (桌面宠物通信)
+ *         ├── 启动桌面宠物窗口 (desktop_pet/main.py)
  *         ├── 监听 onDidChangeDiagnostics（诊断变化事件）
  *         ├── 监听 onDidChangeTextDocument（文本编辑事件）
  *         └── 扫描启动时已存在的诊断信息
@@ -26,33 +28,31 @@
  *
  *   VS Code 事件源                   目标
  *   ─────────────────────────────────────────────────
- *   诊断变化 (DiagnosticsChanged)  → Webview + Python
+ *   诊断变化 (DiagnosticsChanged)  → Webview + Python + 桌面宠物
  *   文本编辑 (TextDocumentChange)  → Webview + Python
- *   Python stdout                  → Webview (+ 状态栏)
+ *   Python stdout                  → Webview + 状态栏 + 桌面宠物(SSE)
  *   Python stderr                  → Webview
  *   Webview requestSync            → Webview (sync 响应)
+ *   桌面宠物 SSE 连接              → HTTP SSE 推送
  *
  * 【消息协议】
  *   扩展与 Webview 之间通过 JSON 消息通信，每条消息包含 type 和 payload 字段。
  *   扩展与 Python 之间通过 stdin/stdout 以换行分隔的 JSON 行通信。
+ *   扩展与桌面宠物之间通过 HTTP SSE（Server-Sent Events）通信。
  *
  *   Extension → Webview:  diagnostics, heartbeat, pythonMessage, pythonText,
  *                          pythonError, backendExit, sync
  *   Extension → Python:    heartbeat, diagnostics
+ *   Extension → Desktop:   chatMessage, errorAlert, statusChange, backendExit (SSE)
  *   Webview → Extension:   requestSync
  *   Python → Extension:    任意 JSON 对象（通过 stdout）
- *
- * 【模块级状态说明】
- *   以下变量使用模块级作用域（而非函数内局部变量），因为：
- *   - activate() 和 deactivate() 需要共享 Python 进程引用以便清理
- *   - 多个事件回调函数需要访问同一个 Webview 面板和心跳计数器
- *   - VS Code 扩展的 activate 函数只在激活时调用一次，模块级状态
- *     在扩展的整个生命周期内持续存在
  */
 
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
+import * as http from 'http';
 
 // ============================================================================
 // 模块级状态（全局单例）
@@ -89,6 +89,25 @@ let heartbeatCounter = 0;
 const supportedLanguageIds = new Set(['c', 'cpp', 'python']);
 
 // ============================================================================
+// 桌面宠物相关状态
+// ============================================================================
+
+/** HTTP 服务器，用于向桌面宠物窗口推送消息（SSE） */
+let httpServer: http.Server | undefined;
+
+/** SSE 客户端列表（桌面宠物窗口 EventSource 连接） */
+const sseClients: http.ServerResponse[] = [];
+
+/** 桌面宠物 Python 子进程引用 */
+let desktopPetProcess: cp.ChildProcess | undefined;
+
+/** HTTP 服务器实际监听的端口号（由 listen(0) 自动分配） */
+let desktopPort = 0;
+
+/** 扩展安装路径（模块级缓存，避免各处传递 context） */
+let extPath = '';
+
+// ============================================================================
 // activate() — VS Code 扩展入口点
 // ============================================================================
 
@@ -100,15 +119,21 @@ const supportedLanguageIds = new Set(['c', 'cpp', 'python']);
  * 此函数完成以下初始化工作：
  * 1. 注册两个用户命令（helloWorld 和 openAssistant）
  * 2. 启动 Python 后端子进程
- * 3. 创建并显示 Webview 助手面板
- * 4. 订阅诊断变化事件（编译错误/警告）
- * 5. 订阅文本编辑事件（编辑心跳）
- * 6. 扫描当前已存在的诊断信息
- * 7. 注册扩展停用时的清理回调
+ * 3. 启动 HTTP SSE 服务器（桌面宠物通信）
+ * 4. 启动桌面宠物窗口
+ * 5. 创建并显示 Webview 助手面板
+ * 6. 订阅诊断变化事件（编译错误/警告）
+ * 7. 订阅文本编辑事件（编辑心跳）
+ * 8. 扫描当前已存在的诊断信息
+ * 9. 注册扩展停用时的清理回调
  *
  * @param context - VS Code 提供的扩展上下文，用于管理订阅和生命周期
  */
 export function activate(context: vscode.ExtensionContext) {
+	// 诊断：扩展激活入口
+	console.log('[airi-monitor] activate() called, extensionPath:', context.extensionPath);
+	vscode.window.showInformationMessage('Airi Monitor 正在启动…');
+
 	// --- 命令注册 ---
 
 	// 注册 "Hello World" 命令：在右下角弹出一条信息提示
@@ -121,11 +146,45 @@ export function activate(context: vscode.ExtensionContext) {
 		createOrShowAssistantPanel(context);
 	});
 
+	// 注册 "Toggle Desktop Pet" 命令：开关桌面宠物窗口
+	const toggleDesktopPetCommand = vscode.commands.registerCommand('vscode-anime-assistent.toggleDesktopPet', () => {
+		if (desktopPetProcess && !desktopPetProcess.killed) {
+			killDesktopPet();
+			vscode.window.showInformationMessage('Airi 桌面宠物已隐藏');
+		} else {
+			spawnDesktopPet();
+			vscode.window.showInformationMessage('Airi 桌面宠物已召唤');
+		}
+	});
+
 	// 将命令添加到 context.subscriptions，VS Code 会在扩展停用时自动注销
-	context.subscriptions.push(helloCommand, openAssistantCommand);
+	context.subscriptions.push(helloCommand, openAssistantCommand, toggleDesktopPetCommand);
+
+	// --- 缓存扩展路径（供整个生命周期使用，必须在任何异步回调之前设置） ---
+	extPath = context.extensionPath;
 
 	// --- Python 后端启动 ---
-	startPythonBackend(context);
+	try {
+		startPythonBackend(context);
+	} catch (err) {
+		console.error('[airi-monitor] Failed to start Python backend:', err);
+		vscode.window.showErrorMessage(`Airi Python 后端启动失败: ${err}`);
+	}
+
+	// --- 检测 standalone 是否已在运行 ---
+	checkStandalone((standaloneRunning) => {
+		if (standaloneRunning) {
+			console.log('[airi-monitor] Standalone server detected — skipping built-in desktop pet');
+			vscode.window.showInformationMessage('Airi 检测到桌宠已在运行，诊断消息将自动推送');
+		} else {
+			// standalone 未运行，启动内置 HTTP 服务器和桌面宠物
+			try {
+				startDesktopServer();
+			} catch (err) {
+				console.error('[airi-monitor] Failed to start desktop server:', err);
+			}
+		}
+	});
 
 	// --- Webview 面板创建 ---
 	createOrShowAssistantPanel(context);
@@ -182,9 +241,14 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 	// --- 注册清理回调 ---
-	// 当扩展停用时，确保 Python 子进程被终止，避免僵尸进程
+	// 当扩展停用时，确保 Python 子进程和桌面宠物进程被终止，HTTP 服务器关闭
 	context.subscriptions.push(
 		new vscode.Disposable(() => {
+			killDesktopPet();
+			if (httpServer) {
+				httpServer.close();
+				httpServer = undefined;
+			}
 			if (pyProcess && !pyProcess.killed) {
 				pyProcess.kill();
 			}
@@ -198,10 +262,15 @@ export function activate(context: vscode.ExtensionContext) {
 
 /**
  * VS Code 扩展停用时调用的清理函数。
- * 负责终止 Python 子进程，防止进程泄漏。
+ * 负责终止 Python 子进程和桌面宠物进程，关闭 HTTP 服务器，防止进程泄漏。
  * VS Code 会在扩展被禁用、VS Code 关闭或扩展重新加载时调用此函数。
  */
 export function deactivate() {
+	killDesktopPet();
+	if (httpServer) {
+		httpServer.close();
+		httpServer = undefined;
+	}
 	if (pyProcess && !pyProcess.killed) {
 		pyProcess.kill();
 	}
@@ -226,8 +295,27 @@ export function deactivate() {
  *
  * @param context - VS Code 扩展上下文，用于获取扩展安装路径
  */
+function resolvePythonPath(): string {
+    // 尝试系统可用的 Python
+    const candidates = [
+        process.env.AIRI_PYTHON_PATH || '',
+        'C:\\Users\\Mr.hancard\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
+        'python',
+        'python3',
+    ];
+    for (const p of candidates) {
+        if (!p) continue;
+        try {
+            if (p === 'python' || p === 'python3') { return p; }
+            if (fs.existsSync(p)) { return p; }
+        } catch { /* continue */ }
+    }
+    return 'python';
+}
+
 function startPythonBackend(context: vscode.ExtensionContext): void {
-	const pythonPath = 'python';
+	// 优先使用 Python 3.12（pywebview 已安装在此环境），fallback 到系统 python
+	const pythonPath = process.env.AIRI_PYTHON_PATH || resolvePythonPath();
 	// 构造 Python 脚本的绝对路径：<扩展目录>/python_backend/main.py
 	const scriptPath = path.join(context.extensionPath, 'python_backend', 'main.py');
 
@@ -267,11 +355,13 @@ function startPythonBackend(context: vscode.ExtensionContext): void {
 		}
 	});
 
-	// --- stderr 处理：转发错误输出到 Webview ---
+	// --- stderr 处理：转发错误输出到 Webview 并记录到控制台 ---
 	pyProcess.stderr.on('data', (chunk: Buffer) => {
+		const errMsg = chunk.toString();
+		console.error('[airi-monitor] Python backend stderr:', errMsg);
 		postToWebview({
 			type: 'pythonError',
-			payload: { message: chunk.toString() }
+			payload: { message: errMsg }
 		});
 	});
 
@@ -280,12 +370,14 @@ function startPythonBackend(context: vscode.ExtensionContext): void {
 		vscode.window.showErrorMessage(`Failed to start Python backend: ${error.message}`);
 	});
 
-	// --- 进程退出处理：通知 Webview 后端已退出 ---
+	// --- 进程退出处理：通知 Webview 和桌面宠物后端已退出 ---
 	pyProcess.on('exit', (code, signal) => {
-		postToWebview({
+		const msg = {
 			type: 'backendExit',
 			payload: { code, signal }
-		});
+		};
+		postToWebview(msg);
+		broadcastToDesktop(msg);
 	});
 }
 
@@ -298,6 +390,7 @@ function startPythonBackend(context: vscode.ExtensionContext): void {
  *
  * 如果该行是合法的 JSON，则：
  * - 作为 pythonMessage 发送到 Webview 面板
+ * - 同步广播到桌面宠物窗口（SSE）
  * - 如果 JSON 中包含 message 字段，在 VS Code 状态栏显示 3 秒
  *
  * 如果该行不是合法的 JSON（例如 Python 的 print 调试输出），
@@ -307,9 +400,9 @@ function startPythonBackend(context: vscode.ExtensionContext): void {
  */
 function handlePythonLine(line: string): void {
 		try {
-			const parsed = JSON.parse(line) as { type?: string; payload?: { message?: string; text?: string }; message?: string; [key: string]: unknown };
+			const parsed = JSON.parse(line) as { type?: string; payload?: { message?: string; text?: string; [key: string]: unknown }; message?: string; [key: string]: unknown };
 
-			// 根据消息类型路由到 Webview
+			// 根据消息类型路由到 Webview 和桌面宠物
 			// chatMessage / errorAlert / statusChange → 直接转发
 			// 其他 → 作为 pythonMessage 转发（兼容旧协议）
 			const msgType = parsed.type;
@@ -321,6 +414,12 @@ function handlePythonLine(line: string): void {
 					payload: parsed
 				});
 			}
+
+			// 广播到桌面宠物窗口（SSE）
+			broadcastToDesktop(parsed);
+
+			// 推送到独立服务器（standalone.py），使双击启动的桌宠也能接收消息
+			pushToStandalone(parsed);
 
 			// 如果有文本消息，在状态栏短暂显示
 			const displayText = parsed.payload?.text || parsed.payload?.message || parsed.message;
@@ -411,13 +510,8 @@ function handleDiagnosticsChanged(uris: readonly vscode.Uri[]): void {
 			}));
 	});
 
-	// 如果没有错误，不发送空事件
-	if (errors.length === 0) {
-		return;
-	}
-
-	// 构建诊断事件
-	const event = {
+	// 构建诊断事件负载
+	const diagnosticsPayload = {
 		type: 'diagnostics',
 		payload: {
 			count: errors.length,
@@ -426,38 +520,53 @@ function handleDiagnosticsChanged(uris: readonly vscode.Uri[]): void {
 		}
 	};
 
-		// 发送给 Python 后端生成傲娇回复（Webview 由后端驱动）
-		sendToPython(event);
+	// 发送到 Webview 面板（显示错误列表和气泡）
+	postToWebview(diagnosticsPayload);
 
-		// --- 检测错误清零 (all_clear) ---
-		// 扫描所有受支持文件的当前错误总数
-		let totalErrors = 0;
-		for (const doc of vscode.workspace.textDocuments) {
-			if (supportedLanguageIds.has(doc.languageId)) {
-				totalErrors += vscode.languages.getDiagnostics(doc.uri)
-					.filter(d => d.severity === vscode.DiagnosticSeverity.Error).length;
-			}
-		}
-
-		if (lastErrorCount > 0 && totalErrors === 0) {
-			sendToPython({
-				type: 'diagnostics',
-				payload: {
-					count: 0,
-					items: [],
-					language: 'unknown',
-					files: [],
-					trigger: 'all_clear',
-					timestamp: new Date().toISOString()
-				}
-			});
-		}
-
-		lastErrorCount = totalErrors;
+	// 只有当存在错误时才发送到 Python 后端（减少不必要的处理）
+	if (errors.length > 0) {
+		sendToPython(diagnosticsPayload);
+		// 同时发送原始诊断数据到 standalone 服务器（即使 Python 后端挂了也能工作）
+		pushToStandalone(diagnosticsPayload);
 	}
 
+	// --- all_clear 检测（错误清零） ---
+	// 如果上次有错误，这次没有了 → 说明程序员修好了所有错误
+	if (lastErrorCount > 0 && errors.length === 0) {
+		// 构造 all_clear 上下文并发送到 Python 后端
+		sendToPython({
+			type: 'diagnostics',
+			payload: {
+				count: 0,
+				items: [],
+				timestamp: new Date().toISOString()
+			}
+		});
+
+		// 同时发送 trigger 标记，让 Python 知道这是 all_clear 事件
+		sendToPython({
+			trigger: 'all_clear',
+			error_count: 0,
+			language: 'unknown',
+			files: [],
+			sample_errors: []
+		});
+		// 也推送到 standalone（格式：trigger=all_clear）
+		pushToStandalone({
+			trigger: 'all_clear',
+			error_count: 0,
+			language: 'unknown',
+			files: [],
+			sample_errors: []
+		});
+	}
+
+	// 更新缓存的上次错误数量
+	lastErrorCount = errors.length;
+}
+
 // ============================================================================
-// createOrShowAssistantPanel() — Webview 面板管理
+// createOrShowAssistantPanel() — 创建/显示助手面板
 // ============================================================================
 
 /**
@@ -497,7 +606,17 @@ function createOrShowAssistantPanel(context: vscode.ExtensionContext): void {
 	);
 
 	// 设置 Webview 的 HTML 内容
-	panel.webview.html = getWebviewHtml();
+	        // 尝试加载角色立绘作为头像
+        let avatarUri = '';
+        try {
+            const charImgPath = path.join(context.extensionPath, 'desktop_pet', 'assets', 'character.png');
+            if (fs.existsSync(charImgPath)) {
+                avatarUri = panel.webview.asWebviewUri(vscode.Uri.file(charImgPath)).toString();
+            }
+        } catch (e) {
+            // 静默降级，使用文字头像
+        }
+        panel.webview.html = getWebviewHtml(avatarUri);
 
 	// 监听面板销毁事件：用户关闭面板时，将单例引用置空
 	panel.onDidDispose(() => {
@@ -611,9 +730,10 @@ function normalizeDiagnosticCode(
  *   - 最多显示 20 条（slice(0, 20)）
  *   - 每条包含：错误消息文本 + 元信息（语言、文件路径、行列号）
  *
+ * @param avatarUri - (可选) 角色图像的 webview URI，如果提供则替换文字头像
  * @returns 完整的 HTML 文档字符串
  */
-function getWebviewHtml(): string {
+function getWebviewHtml(avatarUri?: string): string {
 		return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -800,9 +920,10 @@ function getWebviewHtml(): string {
 
   <!-- 桌宠角色 -->
   <div class="pet-area">
-    <div class="avatar" id="avatar" title="戳戳 Airi">
-      <!-- 默认文字头像，替换为 <img src="..."> 即可自定义 -->
-      A
+        <div class="avatar" id="avatar" title="戳戳 Airi">
+      <!-- 优先显示角色立绘，无图片时显示文字头像 -->
+      <img id="avatarImg" src="" alt="Airi" style="display:none" />
+      <span id="avatarText">A</span>
     </div>
     <div class="pet-name">Airi</div>
     <div class="pet-status">
@@ -906,8 +1027,299 @@ function getWebviewHtml(): string {
       setTimeout(function() { avatarEl.style.transform = 'scale(1)'; }, 120);
     });
 
+        // 加载角色立绘（webview URI）
+    (function() {
+      var AVATAR_URI = "${avatarUri || ""}";
+      if (AVATAR_URI && AVATAR_URI.length > 0) {
+        var img = document.getElementById('avatarImg');
+        var txt = document.getElementById('avatarText');
+        img.onload = function() { img.style.display = 'block'; txt.style.display = 'none'; };
+        img.onerror = function() { img.style.display = 'none'; txt.style.display = 'inline'; };
+        img.src = AVATAR_URI;
+      }
+    })();
+
     vscode.postMessage({ type: 'requestSync' });
   </script>
 </body>
 </html>`;
 	}
+
+// ============================================================================
+// startDesktopServer() — 启动 HTTP SSE 服务器
+// ============================================================================
+
+/**
+ * 启动本地 HTTP 服务器，用于向桌面宠物窗口推送消息。
+ *
+ * 使用 Server-Sent Events (SSE) 协议：
+ * - GET /events → SSE 事件流，桌面宠物通过 EventSource 连接
+ * - GET /ping  → 健康检查，返回 {"status":"ok"}
+ * - POST /event → 接收桌面宠物发来的事件
+ *
+ * 服务器仅监听 127.0.0.1（localhost），不接受外部连接。
+ * 端口由 listen(0) 自动分配，避免冲突。
+ */
+function startDesktopServer(): void {
+	httpServer = http.createServer((req, res) => {
+		// CORS 头，允许本地 pywebview 窗口跨域访问
+		res.setHeader('Access-Control-Allow-Origin', '*');
+		res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+		res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+		// 预检请求
+		if (req.method === 'OPTIONS') {
+			res.writeHead(204);
+			res.end();
+			return;
+		}
+
+		if (req.url === '/events' && req.method === 'GET') {
+			// SSE 端点：保持长连接，推送事件
+			res.writeHead(200, {
+				'Content-Type': 'text/event-stream',
+				'Cache-Control': 'no-cache',
+				'Connection': 'keep-alive',
+			});
+			// 发送初始注释，确认连接成功
+			res.write(':ok\n\n');
+
+			sseClients.push(res);
+
+			// 客户端断开时清理
+			req.on('close', () => {
+				const idx = sseClients.indexOf(res);
+				if (idx >= 0) {
+					sseClients.splice(idx, 1);
+				}
+			});
+		} else if (req.url === '/ping' && req.method === 'GET') {
+			// 健康检查
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ status: 'ok', port: desktopPort }));
+		} else if (req.url === '/event' && req.method === 'POST') {
+			// 接收桌面宠物发来的事件
+			let body = '';
+			req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+			req.on('end', () => {
+				try {
+					const msg = JSON.parse(body);
+					// 桌面宠物就绪通知
+					if (msg.type === 'desktopReady') {
+						console.log('[airi-monitor] Desktop pet connected');
+					}
+				} catch { /* 忽略无效 JSON */ }
+				res.writeHead(200);
+				res.end();
+			});
+		} else {
+			console.log(`[airi-monitor] 404 Not Found: ${req.method} ${req.url}`);
+			res.writeHead(404);
+			res.end('404 Not Found');
+		}
+	});
+
+	// 监听随机端口，就绪后自动启动桌面宠物
+	httpServer.listen(0, '127.0.0.1', () => {
+		const addr = httpServer!.address();
+		if (addr && typeof addr === 'object') {
+			desktopPort = addr.port;
+			console.log(`[airi-monitor] Desktop server listening on http://127.0.0.1:${desktopPort}`);
+			// 端口已分配，可以安全启动桌面宠物
+			try {
+				spawnDesktopPet();
+				vscode.window.showInformationMessage(`Airi 桌宠已启动 (端口 ${desktopPort})`);
+			} catch (err) {
+				console.error('[airi-monitor] Failed to spawn desktop pet:', err);
+			}
+		}
+
+		// SSE keepalive：每 20 秒发送心跳注释，防止代理/浏览器断开空闲连接
+		// （放在 listen 回调内，避免 listen 失败时定时器泄漏）
+		const keepaliveInterval = setInterval(() => {
+			if (sseClients.length === 0) { return; }
+			for (const client of [...sseClients]) {
+				try { client.write(':ping\n\n'); } catch { /* close 事件会清理 */ }
+			}
+		}, 20000);
+
+		// 服务器关闭时清除定时器
+		httpServer!.on('close', () => {
+			clearInterval(keepaliveInterval);
+		});
+	});
+}
+
+// ============================================================================
+// broadcastToDesktop() — 向所有桌面宠物 SSE 客户端广播消息
+// ============================================================================
+
+/**
+ * 将消息广播到所有已连接的桌面宠物窗口（SSE 客户端）。
+ *
+ * 消息以标准 SSE 格式发送：`data: <JSON>\n\n`
+ * 如果没有任何客户端连接，则静默跳过。
+ * 写入失败（如客户端已断开但尚未清理）会被静默捕获。
+ *
+ * @param message - 要广播的消息对象
+ */
+function broadcastToDesktop(message: unknown): void {
+	if (sseClients.length === 0) {
+		return;
+	}
+
+	const data = `data: ${JSON.stringify(message)}\n\n`;
+
+	// 遍历副本，避免在迭代过程中因 close 事件修改数组
+	for (const client of [...sseClients]) {
+		try {
+			client.write(data);
+		} catch {
+			// 写入失败（客户端已断开），close 事件会自行清理
+		}
+	}
+}
+
+// ============================================================================
+// pushToStandalone() — 向独立服务器推送消息（VS Code 对接）
+// ============================================================================
+
+/**
+ * 检测 standalone.py 服务器是否在运行（通过 ping localhost:19876）
+ * @param callback — 接收 boolean 结果
+ */
+function checkStandalone(callback: (running: boolean) => void): void {
+	const req = http.request(
+		{ hostname: '127.0.0.1', port: 19876, path: '/ping', method: 'GET', timeout: 1000 },
+		(res) => {
+			let body = '';
+			res.on('data', (c: Buffer) => body += c.toString());
+			res.on('end', () => {
+				try {
+					const data = JSON.parse(body);
+					callback(data.status === 'ok');
+				} catch { callback(false); }
+			});
+		}
+	);
+	req.on('error', () => callback(false));
+	req.on('timeout', () => { req.destroy(); callback(false); });
+	req.end();
+}
+
+/**
+ * 向 standalone.py 启动的独立 HTTP 服务器推送消息。
+ *
+ * 独立服务器监听 http://127.0.0.1:19876/push，
+ * 如果服务器未运行则静默跳过（POST 请求失败不影响任何功能）。
+ *
+ * 这使得：双击 launch.bat 启动桌宠 → F5 启动扩展 → 诊断消息自动推送。
+ *
+ * @param message - 要推送的消息对象
+ */
+function pushToStandalone(message: unknown): void {
+	try {
+		const body = JSON.stringify(message);
+		const req = http.request(
+			{
+				hostname: '127.0.0.1',
+				port: 19876,
+				path: '/push',
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Content-Length': Buffer.byteLength(body),
+				},
+				timeout: 500, // 500ms 超时，不阻塞
+			},
+			() => { /* 忽略响应 */ }
+		);
+		req.on('error', () => { /* 服务器未运行，静默跳过 */ });
+		req.on('timeout', () => { req.destroy(); });
+		req.write(body);
+		req.end();
+	} catch {
+		/* 静默失败 */
+	}
+}
+// ============================================================================
+
+/**
+ * 启动桌面宠物 Python 进程。
+ *
+ * 桌面宠物使用 pywebview 创建透明无边框窗口，通过 SSE 接收消息。
+ * 进程启动时传入端口号作为命令行参数。
+ *
+ * 注意：必须在 startDesktopServer 的 listen 回调中调用，
+ * 以确保 desktopPort 已分配。直接调用时如果端口未就绪会静默跳过。
+ *
+ * 如果进程已在运行（未 killed），则不会重复启动。
+ * 启动失败时静默降级：不影响 VS Code 插件正常功能。
+ */
+function spawnDesktopPet(): void {
+	// 避免重复启动
+	if (desktopPetProcess && !desktopPetProcess.killed) {
+		return;
+	}
+
+	// 端口必须已分配（由 startDesktopServer 的 listen 回调保证）
+	if (desktopPort === 0) {
+		console.log('[airi-monitor] Desktop pet: port not ready yet, skipping');
+		return;
+	}
+
+	// 构造脚本路径（使用模块级缓存的扩展路径，不依赖 context 参数）
+	const scriptDir = path.join(extPath, 'desktop_pet');
+	const scriptPath = path.join(scriptDir, 'main.py');
+
+	const pythonPath = process.env.AIRI_PYTHON_PATH || resolvePythonPath();
+
+	try {
+		desktopPetProcess = cp.spawn(pythonPath, [scriptPath, '--port', String(desktopPort)], {
+			cwd: scriptDir,
+			stdio: 'pipe',
+			env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+			// 作为 VS Code 子进程运行，扩展停用时由 deactivate() 负责 kill
+		});
+
+		desktopPetProcess.on('error', () => {
+			// Python 或 pywebview 不可用时静默降级
+			// VS Code Webview 面板仍然可用
+			console.log('[airi-monitor] Desktop pet failed to start (Python/pywebview not available)');
+			desktopPetProcess = undefined;
+		});
+
+		desktopPetProcess.on('exit', (code) => {
+			console.log(`[airi-monitor] Desktop pet exited with code ${code}`);
+			desktopPetProcess = undefined;
+		});
+
+		// 把 stderr 输出到 VS Code 控制台便于调试
+		if (desktopPetProcess.stderr) {
+			desktopPetProcess.stderr.on('data', (chunk: Buffer) => {
+				console.log(`[airi-monitor] Desktop pet stderr: ${chunk.toString()}`);
+			});
+		}
+	} catch {
+		// cp.spawn 可能抛出异常（如路径不存在）
+		console.log('[airi-monitor] Desktop pet spawn failed');
+		desktopPetProcess = undefined;
+	}
+}
+
+// ============================================================================
+// killDesktopPet() — 终止桌面宠物窗口进程
+// ============================================================================
+
+/**
+ * 终止桌面宠物 Python 进程。
+ *
+ * 发送 SIGTERM 信号，让 pywebview 窗口正常关闭。
+ * 如果进程不存在或已终止，则静默跳过。
+ */
+function killDesktopPet(): void {
+	if (desktopPetProcess && !desktopPetProcess.killed) {
+		desktopPetProcess.kill();
+		desktopPetProcess = undefined;
+	}
+}

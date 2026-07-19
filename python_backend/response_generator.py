@@ -1,4 +1,4 @@
-"""
+﻿"""
 ============================================================================
 response_generator.py — 回复生成器
 ============================================================================
@@ -9,16 +9,13 @@ response_generator.py — 回复生成器
 1. 如果设置了环境变量 DEEPSEEK_API_KEY，调用 DeepSeek API
 2. 否则从本地语料库随机抽取匹配场景的台词
 
-上下文格式（由 Extension 传入）：
+返回格式（v2 — 含情绪）：
 {
-    "trigger": "diagnostics" | "all_clear" | "greeting" | "heartbeat",
-    "error_count": int,
-    "language": "python" | "c" | "cpp",
-    "files": ["file1.py", "file2.py"],
-    "sample_errors": [
-        {"file": "...", "line": 23, "message": "...", "source": "..."},
-        ...
-    ]
+    "type": "chatMessage" | "errorAlert",
+    "payload": {
+        "text": "回复文本",
+        "emotion": "angry" | "happy" | "surprised" | "greeting" | "idle"
+    }
 }
 """
 
@@ -28,6 +25,7 @@ import json
 from corpus import (
     SYNTAX_ERROR, TYPE_ERROR, IMPORT_ERROR, NAME_ERROR,
     MANY_ERRORS, ALL_CLEAR, GREETING, IDLE, ENCOURAGE,
+    get_emotion,
 )
 
 
@@ -35,31 +33,27 @@ def classify_error_category(message: str, source: str = "") -> str:
     """根据错误消息文本推断错误类别"""
     msg_lower = message.lower()
 
-    # 语法错误关键词
     syntax_keywords = ["syntax", "invalid syntax", "expected", "unexpected",
                        "missing", "eof", "indentation", "indent", "token"]
     if any(kw in msg_lower for kw in syntax_keywords):
         return "syntax_error"
 
-    # 类型错误关键词
     type_keywords = ["type", "cannot be", "not assignable", "has no attribute",
                      "is not", "incompatible", "cast", "conversion"]
     if any(kw in msg_lower for kw in type_keywords):
         return "type_error"
 
-    # 导入错误关键词
     import_keywords = ["module", "import", "no module named", "cannot find",
                        "unresolved", "could not find", "not found"]
     if any(kw in msg_lower for kw in import_keywords):
         return "import_error"
 
-    # 名称错误关键词
     name_keywords = ["is not defined", "undefined", "unresolved reference",
                      "cannot find name", "undeclared", "nameerror"]
     if any(kw in msg_lower for kw in name_keywords):
         return "name_error"
 
-    return "syntax_error"  # 默认归类为语法错误
+    return "syntax_error"
 
 
 def categorize_errors(errors: list) -> str:
@@ -67,13 +61,11 @@ def categorize_errors(errors: list) -> str:
     if not errors:
         return "syntax_error"
 
-    # 统计各类别出现次数
     counts = {}
     for err in errors:
         cat = classify_error_category(err.get("message", ""), err.get("source", ""))
         counts[cat] = counts.get(cat, 0) + 1
 
-    # 返回最常见的类别
     return max(counts, key=counts.get)
 
 
@@ -94,7 +86,6 @@ def pick_corpus(category: str, variables: dict = None) -> str:
     lines = corpus_map.get(category, ENCOURAGE)
     text = random.choice(lines)
 
-    # 替换变量占位符（如 {count}, {line}, {language}）
     if variables:
         for key, value in variables.items():
             text = text.replace("{" + key + "}", str(value))
@@ -109,7 +100,6 @@ def try_deepseek_api(context: dict) -> str | None:
         return None
 
     try:
-        # 延迟导入，避免在无 openai 库时崩溃
         from openai import OpenAI
 
         client = OpenAI(
@@ -164,12 +154,15 @@ def try_deepseek_api(context: dict) -> str | None:
 
 def generate_response(context: dict) -> dict:
     """
-    主入口：根据上下文生成回复消息。
+    主入口：根据上下文生成回复消息（含情绪标签）。
 
     返回格式：
     {
         "type": "chatMessage" | "errorAlert",
-        "payload": {"text": "回复文本"}
+        "payload": {
+            "text": "回复文本",
+            "emotion": "angry" | "happy" | "surprised" | "greeting" | "idle"
+        }
     }
     """
     trigger = context.get("trigger", "diagnostics")
@@ -183,29 +176,41 @@ def generate_response(context: dict) -> dict:
     else:
         msg_type = "chatMessage"
 
+    # 情绪计算
+    if trigger == "greeting":
+        emotion = "greeting"
+        category = "greeting"
+    elif trigger == "all_clear":
+        emotion = "happy"
+        category = "all_clear"
+    elif trigger == "diagnostics":
+        if error_count >= 5:
+            emotion = "surprised"
+            category = "many_errors"
+        else:
+            category = categorize_errors(errors)
+            emotion = get_emotion(category)
+    elif trigger == "heartbeat":
+        return None
+    else:
+        emotion = "idle"
+        category = "encourage"
+
     # 尝试 DeepSeek API
     api_result = try_deepseek_api(context)
     if api_result:
-        return {"type": msg_type, "payload": {"text": api_result}}
+        return {"type": msg_type, "payload": {"text": api_result, "emotion": emotion}}
 
     # Fallback: 从语料库抽取
-    if trigger == "greeting":
-        text = pick_corpus("greeting")
-    elif trigger == "all_clear":
-        text = pick_corpus("all_clear")
-    elif trigger == "diagnostics":
+    if trigger == "diagnostics":
         if error_count >= 5:
             text = pick_corpus("many_errors", {"count": error_count, "language": language})
         else:
-            category = categorize_errors(errors)
             variables = {"language": language}
             if errors:
                 variables["line"] = errors[0].get("line", "?")
             text = pick_corpus(category, variables)
-    elif trigger == "heartbeat":
-        # 心跳事件不生成回复（太频繁）
-        return None
     else:
-        text = pick_corpus("encourage")
+        text = pick_corpus(category)
 
-    return {"type": msg_type, "payload": {"text": text}}
+    return {"type": msg_type, "payload": {"text": text, "emotion": emotion}}

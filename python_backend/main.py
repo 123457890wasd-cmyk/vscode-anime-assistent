@@ -1,4 +1,4 @@
-"""
+﻿"""
 ============================================================================
 main.py — Airi Monitor 的 Python 后端入口
 ============================================================================
@@ -37,6 +37,7 @@ sys.stderr.reconfigure(encoding='utf-8')
 
 from character import CHARACTER_NAME
 from response_generator import generate_response, pick_corpus
+from corpus import get_emotion
 
 
 def send_message(msg: dict):
@@ -94,10 +95,7 @@ def main():
 
     # 启动时发送 greeting
     greeting = pick_corpus("greeting")
-    send_message({
-        "type": "chatMessage",
-        "payload": {"text": greeting}
-    })
+    send_message({"type": "chatMessage","payload": {"text": greeting, "emotion": "greeting"}})
 
     # 标记已就绪
     send_message({
@@ -140,3 +138,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

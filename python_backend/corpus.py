@@ -1,15 +1,4 @@
-"""
-============================================================================
-corpus.py — 本地语料库
-============================================================================
-
-按场景分类的傲娇台词集合。当 DeepSeek API 不可用时，
-从此库中随机抽取匹配场景的回复。
-
-每个场景对应一个列表，列表中每条是一个字符串。
-"""
-
-# 语法错误场景
+﻿# 语法错误场景
 SYNTAX_ERROR = [
     "笨蛋！括号都配不对的吗？好好数数行不行！",
     "语法错误…你是刚睡醒吗？这种低级错误也写得出来？",
@@ -112,3 +101,24 @@ def get_scene_name(category: str) -> str:
         "encourage": "鼓励",
     }
     return names.get(category, "未知场景")
+
+
+# ============================================================================
+# 情绪映射：场景 → 立绘表情
+# ============================================================================
+EMOTION_MAP = {
+    "syntax_error": "angry",
+    "type_error": "angry",
+    "import_error": "angry",
+    "name_error": "angry",
+    "many_errors": "surprised",
+    "all_clear": "happy",
+    "greeting": "greeting",
+    "idle": "idle",
+    "encourage": "happy",
+}
+
+
+def get_emotion(category: str) -> str:
+    """返回场景对应的情绪标识，用于驱动立绘表情切换"""
+    return EMOTION_MAP.get(category, "idle")
