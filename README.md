@@ -1,5 +1,6 @@
 # Airi Monitor (vscode-anime-assistent)
-
+请注意，当前这个项目只是最初版本，可能会有很大的变化。
+Please note that this project is currently in its initial stage and is subject to significant changes.
 > **Airi（愛莉）** — 一个傲娇的二次元桌宠，陪伴你在 VS Code 中写代码。  
 > 她会监控你的 C/C++/Python 编译错误，用毒舌又暖心的方式吐槽你的 bug。
 
