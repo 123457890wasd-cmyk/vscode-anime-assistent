@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 set PYTHON=%AIRI_PYTHON_PATH%
 if "%PYTHON%"=="" set PYTHON=python
 

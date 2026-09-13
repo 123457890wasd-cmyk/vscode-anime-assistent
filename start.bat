@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 cd /d "%~dp0desktop_pet"
 set PYTHON=%AIRI_PYTHON_PATH%
 if "%PYTHON%"=="" set PYTHON=C:\Users\Mr.hancard\AppData\Local\Programs\Python\Python312\python.exe

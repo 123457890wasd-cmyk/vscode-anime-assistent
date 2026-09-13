@@ -1,5 +1,25 @@
 # Change Log
 
+## [0.2.1] — 2026-09-13
+
+### Added
+- `Launch Airi Desktop Pet` VS Code 命令：在扩展内一键启动桌宠
+  （自动查找 Python → 分离进程运行 `desktop_pet/standalone.py` → 探测 19876 端口确认启动成功）
+- `checkStandaloneAlive()` 健康探测（15s 缓存）：桌宠服务器未运行时不再发送无意义请求
+- 重建 `desktop_pet/common.py`（此前被误删且从未提交，导致 standalone.py / main.py
+  启动即崩溃 `ModuleNotFoundError: No module named 'common'`）：
+  - `get_screen_size()` — ctypes 物理像素（DPI aware），非 Windows 回退 tkinter
+  - `WindowAPI` — pywebview js_api（拖拽移动 / 读取位置 / 隐藏窗口）
+  - `find_character_image()` — 查找 assets/ 下的自定义立绘
+  - `load_html()` — 注入 ui.html 的 `{{PORT}}` / `{{CHARACTER_IMAGE}}` 占位符
+  - `create_temp_html()` — 写临时 HTML 并返回 file:// URL
+
+### Fixed
+- Webview 面板：错误信息先 HTML 转义再拼接，避免编译器错误中的 `<` `>` 等字符破坏显示
+- 诊断清零时的 `all_clear` 消息只在桌宠服务器在线时发送
+- `start.bat` / `launch_full.bat` 中文乱码（文件头加 `chcp 65001`）
+- 删除误生成的垃圾文件 `desktop_pet/$null`
+
 ## [0.2.0] — 2026-06-24
 
 ### Added
