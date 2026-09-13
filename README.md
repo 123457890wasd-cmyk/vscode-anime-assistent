@@ -1,8 +1,9 @@
 # Airi Monitor (vscode-anime-assistent)
-请注意，当前这个项目只是最初版本，可能会有很大的变化。
-Please note that this project is currently in its initial stage and is subject to significant changes.
-> **Airi（愛莉）** — 一个傲娇的二次元桌宠，陪伴你在 VS Code 中写代码。  
+
+> **Airi（愛莉）** — 一个傲娇的二次元桌宠，陪伴你在 VS Code 中写代码。
 > 她会监控你的 C/C++/Python 编译错误，用毒舌又暖心的方式吐槽你的 bug。
+
+当前版本：**v0.2.1**
 
 ---
 
@@ -10,50 +11,55 @@ Please note that this project is currently in its initial stage and is subject t
 
 ```
 ┌──────────────────────┐
-│  "笨蛋！括号都配不对  │  ← 聊天气泡（自动弹出/消失）
+│  "笨蛋！括号都配不对  │  ← 聊天气泡（打字机效果，8 秒自动消失）
 │   的吗？好好数数！"   │
 └──────┬───────────────┘
        │
     ┌──┴──┐
-    │  A  │  ← 圆形头像（可拖拽移动窗口）
+    │ (•̀ᴗ•́)│  ← Q 版角色 / 自定义立绘（可拖拽移动窗口）
     └─────┘
-    Airi
     ● online           ← 在线状态指示
 ```
 
 窗口透明无边框、置顶显示、可在屏幕任意位置拖动。
+角色带情绪表情系统：`idle` / `greeting` / `angry` / `happy` / `surprised`。
 
 ---
 
 ## 架构
 
 ```
-┌─────────────────────────────────────────┐
-│  VS Code Extension (TypeScript)         │
-│  src/extension.ts                       │
-│                                         │
-│  • 监听 C/C++/Python 诊断错误           │
-│  • 启动 Python 后端 (stdin/stdout)      │
-│  • 启动 HTTP SSE 服务器 (localhost)     │
-│  • 启动桌面宠物进程                     │
-│  • VS Code Webview Panel (兼容模式)     │
-└──────┬──────────────┬───────────────────┘
-       │              │
-       ▼              ▼ SSE (HTTP)
-┌──────────────┐  ┌──────────────────────┐
-│ Python 后端   │  │ Desktop Pet 窗口     │
-│              │  │ (pywebview)          │
-│ main.py      │  │                      │
-│ character.py │  │ • 透明无边框窗口      │
-│ corpus.py    │  │ • EventSource 接收    │
-│ response_    │  │ • 可拖拽移动          │
-│ generator.py │  │ • 聊天气泡动画        │
-└──────────────┘  └──────────────────────┘
+┌────────────────────────────────────────────┐
+│  VS Code Extension (TypeScript) — 轻量桥接 │
+│  src/extension.ts                          │
+│                                            │
+│  • 监听 C/C++/Python 诊断错误              │
+│  • POST /push 转发到桌宠服务器 (19876)     │
+│  • checkStandaloneAlive() 健康探测(15s缓存)│
+│  • Webview Panel (VS Code 内备用显示)      │
+│  • Launch Airi Desktop Pet 一键启动命令    │
+└──────────────┬─────────────┬───────────────┘
+               │             ▲ POST /push
+               ▼             │ (watcher.py 独立监听文件保存)
+┌────────────────────────────────────────────┐
+│  standalone.py — 独立桌宠服务器             │
+│  ThreadingHTTPServer + SSE + pywebview     │
+│                                            │
+│  • /push 接收诊断 → generate_response      │
+│  • SSE 广播 → ui.html 气泡 + 情绪切换      │
+│  • assets/character.png 自定义立绘         │
+└──────────────┬─────────────────────────────┘
+               ▼
+┌────────────────────────────────────────────┐
+│  python_backend/ — 回复生成（傲娇大脑）     │
+│  corpus.py 语料库 / response_generator.py  │
+│  本地语料库 或 DeepSeek API 双通道          │
+└────────────────────────────────────────────┘
 ```
 
-- **Python 后端**：分析错误类型 → 从语料库挑选傲娇台词（或调用 DeepSeek API）
-- **SSE 推送**：Python 的回复通过 Extension 广播到桌面宠物窗口
-- **桌面宠物**：独立于 VS Code 的透明窗口，可拖到桌面任意位置
+- **VS Code 扩展**：只做一件事——把诊断错误转发到桌宠服务器。不启动任何 Python 进程，桌宠不在线时静默跳过。
+- **standalone.py**：桌宠本体 + 服务器 + 大脑，完全独立于 VS Code 运行。
+- **watcher.py**：可选的独立文件监听器，不用 VS Code 也能用（保存 .py/.c/.cpp 时自动跑语法检查并推送）。
 
 ---
 
@@ -63,9 +69,9 @@ Please note that this project is currently in its initial stage and is subject t
 
 | 依赖 | 版本 | 说明 |
 |------|------|------|
-| VS Code | ≥ 1.110.0 | 扩展开发环境 |
-| Node.js | ≥ 18 | TypeScript 编译 |
-| Python | ≥ 3.9 | 后端 + 桌面窗口 |
+| VS Code | ≥ 1.110.0 | 扩展运行环境 |
+| Node.js | ≥ 18 | TypeScript 编译（开发扩展时需要） |
+| Python | ≥ 3.10 | `response_generator.py` 使用了 `str \| None` 注解 |
 | pywebview | ≥ 4.0 | 桌面宠物窗口 |
 | Windows | 10+ | WebView2 运行时（Win11 已内置） |
 
@@ -75,30 +81,37 @@ Please note that this project is currently in its initial stage and is subject t
 # 1. 进入项目目录
 cd "S:\My event\projects\vscode-anime-assistent"
 
-# 2. 安装 Node.js 依赖
+# 2. 安装 Node.js 依赖（仅开发/调试扩展时需要）
 npm install
 
 # 3. 安装 Python 依赖
-pip install -r python_backend/requirements.txt
 pip install -r desktop_pet/requirements.txt
+# (可选，启用 DeepSeek AI 回复时)
+pip install -r python_backend/requirements.txt
 
-# 4. 编译 TypeScript
+# 4. 编译 TypeScript（仅开发扩展时需要）
 npm run compile
 
-# 5. (可选) 配置 DeepSeek API Key 启用 AI 回复
-# set DEEPSEEK_API_KEY=sk-xxxxx
+# 5. (可选) 启用 DeepSeek AI 回复：设置系统环境变量
+# setx DEEPSEEK_API_KEY "sk-xxxxx"
+# 可配置项见 .env.example（注意：需设为系统环境变量，代码不自动加载 .env 文件）
 ```
 
-### 运行
+### 运行（三选一）
 
 ```powershell
-# 方式一：VS Code 扩展开发模式（推荐）
-# 在 VS Code 中打开项目 → 按 F5 → 新窗口自动加载扩展
+# 方式一：VS Code 命令面板启动（推荐）
+# Ctrl+Shift+P → 输入 "Launch Airi Desktop Pet"
+# 扩展会自动查找 Python 并启动桌宠，8 秒内确认启动成功
 
-# 方式二：命令行手动启动桌面宠物（调试用）
-python desktop_pet/main.py --port 9876
-# 需要先启动 VS Code 扩展让 HTTP 服务器运行
+# 方式二：一键启动脚本（桌宠 + 文件监听器）
+start.bat
+
+# 方式三：手动启动
+python desktop_pet/standalone.py
 ```
+
+> 调试扩展本身：在 VS Code 中打开项目 → 按 F5 → 新窗口自动加载扩展。
 
 ---
 
@@ -107,83 +120,109 @@ python desktop_pet/main.py --port 9876
 ```
 vscode-anime-assistent/
 ├── src/
-│   └── extension.ts              # 扩展入口 (TypeScript)
-│       ├── activate()            # 启动 Python 后端 + HTTP SSE 服务器 + 桌面宠物
-│       ├── startDesktopServer()  # HTTP SSE 服务器（localhost 随机端口）
-│       ├── spawnDesktopPet()     # 启动 desktop_pet/main.py
-│       ├── broadcastToDesktop()  # 向 SSE 客户端推送消息
-│       ├── handlePythonLine()    # 解析 Python 回复 → Webview + Desktop
-│       └── getWebviewHtml()      # VS Code 内置 Webview UI（兼容模式）
+│   └── extension.ts              # 扩展入口（轻量诊断桥接器）
+│       ├── activate()            # 注册命令 + 诊断监听 + Webview 面板
+│       ├── handleDiagnosticsChanged()  # 收集 C/C++/Python 错误
+│       ├── checkStandaloneAlive()      # 探测桌宠服务器（15s 缓存）
+│       ├── launchStandalonePet()       # 一键启动桌宠命令
+│       ├── pushToStandalone()          # POST http://127.0.0.1:19876/push
+│       └── getWebviewHtml()            # VS Code 内备用 Webview UI
 │
-├── desktop_pet/                  # ★ 桌面宠物窗口（新增）
-│   ├── main.py                   # pywebview 入口 + WindowAPI
-│   ├── ui.html                   # 桌宠 UI（SSE 连接、拖拽、气泡）
+├── desktop_pet/                  # ★ 桌面宠物（独立运行，不依赖 VS Code）
+│   ├── standalone.py             # 主入口：HTTP 服务器 + SSE + pywebview 窗口
+│   ├── watcher.py                # 独立文件监听器（保存即检查）
+│   ├── common.py                 # 共用工具（屏幕尺寸/窗口API/立绘查找/HTML注入）
+│   ├── main.py                   # [旧版入口] 需外部 HTTP 服务器，当前链路未使用
+│   ├── ui.html                   # 桌宠 UI（SSE 连接、拖拽、气泡、情绪表情）
+│   ├── assets/
+│   │   └── character.png         # 自定义立绘（可选情绪变体，见下文）
+│   ├── launch.bat                # 仅启动桌宠
+│   ├── launch_full.bat           # 启动桌宠 + 文件监听器
 │   └── requirements.txt          # pywebview>=4.0
 │
-├── python_backend/               # Python 后端（回复生成）
-│   ├── main.py                   # stdin/stdout 消息循环
+├── python_backend/               # 回复生成（傲娇大脑）
 │   ├── character.py              # Airi 角色人格 + System Prompt
-│   ├── corpus.py                 # 9 类场景、40+ 条傲娇台词
-│   ├── response_generator.py     # 错误分类 + 语料库/API 双通道
-│   └── requirements.txt          # openai>=1.0.0 (可选)
+│   ├── corpus.py                 # 场景语料库 + 情绪映射 (EMOTION_MAP)
+│   ├── response_generator.py     # 错误分类 + 语料库/DeepSeek API 双通道
+│   ├── main.py                   # [旧版] stdin/stdout 后端，当前链路未使用
+│   └── requirements.txt          # openai>=1.0.0 (可选，仅 DeepSeek 需要)
 │
+├── start.bat                     # 一键启动：桌宠 + 文件监听器
+├── .env.example                  # 环境变量模板
 ├── package.json                  # VS Code 扩展清单
-├── tsconfig.json                 # TypeScript 配置
-└── out/                          # 编译产物
-    └── extension.js
+└── out/                          # 编译产物 (extension.js)
 ```
 
 ---
 
 ## 通信协议
 
-### Extension → Desktop Pet (SSE)
+### VS Code 扩展 → 桌宠服务器 (HTTP POST /push)
 
-```
-data: {"type":"chatMessage","payload":{"text":"哼，终于修好了。"}}
-
-data: {"type":"errorAlert","payload":{"text":"笨蛋！括号都配不对！"}}
-
-data: {"type":"statusChange","payload":{"text":"Airi 已就绪"}}
-
-data: {"type":"backendExit","payload":{"code":0,"signal":null}}
-```
-
-### Desktop Pet → Extension (HTTP POST)
+发现错误时：
 
 ```json
-POST /event
-{"type":"desktopReady"}
+{
+  "type": "diagnostics",
+  "payload": {
+    "count": 2,
+    "items": [
+      {"file": "main.c", "languageId": "c", "message": "expected ';'", "source": "gcc", "line": 12, "character": 5}
+    ],
+    "timestamp": "2026-09-13T22:00:00.000Z"
+  }
+}
+```
+
+错误清零时（仅在服务器在线时发送）：
+
+```json
+{"trigger": "all_clear", "error_count": 0, "language": "unknown", "files": [], "sample_errors": []}
+```
+
+### 桌宠服务器 → ui.html (SSE /events)
+
+```
+data: {"type":"chatMessage","payload":{"text":"哼，终于修好了。","emotion":"happy"}}
+
+data: {"type":"errorAlert","payload":{"text":"笨蛋！括号都配不对！","emotion":"angry"}}
 ```
 
 ### HTTP 端点
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/events` | GET | SSE 事件流（桌面宠物连接） |
-| `/ping` | GET | 健康检查 → `{"status":"ok","port":xxxx}` |
-| `/event` | POST | 接收桌面宠物消息 |
+| `/push` | POST | 接收诊断 / all_clear 事件（扩展和 watcher.py 都推这里） |
+| `/events` | GET | SSE 事件流（桌宠窗口连接） |
+| `/ping` | GET | 健康检查 → `{"status":"ok","server":"airi-standalone"}` |
+| `/event` | POST | 接收桌宠窗口消息（如 `desktopReady`） |
 
 ---
 
 ## 功能特性
 
 ### 桌面宠物窗口
-- 🖱️ **拖拽移动**：按住头像拖动到屏幕任意位置
-- 📌 **始终置顶**：悬浮在所有窗口之上
-- 🫧 **聊天气泡**：弹入动画 + 粉色错误边框 + 8 秒自动消失
-- 🖱️ **右键菜单**：隐藏 Airi（可通过 VS Code 命令恢复）
-- 🔄 **自动重连**：VS Code 重启后自动恢复连接
-- 🎨 **透明背景**：融入桌面，类似真正的桌宠
+- 🖱️ **拖拽移动**：按住角色拖到屏幕任意位置
+- 📌 **始终置顶**：透明无边框，悬浮在所有窗口之上
+- 🫧 **聊天气泡**：打字机效果 + 错误红色边框 + 8 秒自动消失（最多 3 条）
+- 😤 **情绪表情系统**：每条回复带情绪，角色表情自动切换，8 秒后回落 idle
+- 🖱️ **右键菜单**：隐藏 Airi
+- 🔄 **自动重连**：SSE 断线后自动恢复连接
 
-### VS Code 集成（兼容模式）
-- 诊断错误监听 → Python 分析 → 傲娇吐槽
-- Webview Panel 作为备选显示
-- 命令面板：`Toggle Desktop Pet` 开关桌宠窗口
+### 自定义立绘
+
+把图片放到 `desktop_pet/assets/character.png` 即可替换默认的 CSS Q 版角色。
+支持情绪变体：在同目录放置 `character_angry.png`、`character_happy.png`、
+`character_surprised.png`、`character_greeting.png`，缺失的情绪会自动回落到默认图。
+
+### VS Code 集成
+- 诊断错误实时转发（C/C++/Python）
+- Webview 面板作为备用显示（不依赖 Python 环境）
+- 健康探测：桌宠不在线时不发送任何请求
 
 ### 回复策略
 1. **DeepSeek API**（设置 `DEEPSEEK_API_KEY` 环境变量）→ AI 生成个性化傲娇回复
-2. **本地语料库**（默认）→ 从 9 类场景随机抽取预写台词
+2. **本地语料库**（默认）→ 按错误类型（语法/类型/导入/未定义名等）从对应场景随机抽取台词
 
 ---
 
@@ -193,8 +232,9 @@ POST /event
 
 | 命令 | 说明 |
 |------|------|
-| `Open Anime Assistant` | 打开 VS Code 内置助手面板 |
-| `Toggle Desktop Pet` | 开关桌面宠物窗口 |
+| `Launch Airi Desktop Pet` | 一键启动桌宠（自动查找 Python，启动后确认服务器在线） |
+| `Open Anime Assistant` | 打开 VS Code 内置助手面板（备用显示） |
+| `Hello World` | 检查扩展是否在运行 |
 
 ---
 
@@ -202,10 +242,15 @@ POST /event
 
 ### Q: 桌面宠物没有出现？
 
-1. 确认已安装 pywebview：`pip show pywebview`
-2. 确认 Python 在 PATH 中：`python --version`
-3. 查看 VS Code 开发者控制台（`Ctrl+Shift+I`）→ 搜索 `[airi-monitor]` 日志
-4. 手动测试：`python desktop_pet/main.py --port 9876`（端口号见控制台日志）
+1. 确认已安装 pywebview：`pip show pywebview`（注意用你启动时的那个 Python）
+2. 确认 Python ≥ 3.10：`python --version`
+3. 用命令面板 `Launch Airi Desktop Pet` 启动，失败会有具体错误提示
+4. 手动运行 `python desktop_pet/standalone.py` 看控制台报错
+
+### Q: 右键隐藏了 Airi，怎么找回来？
+
+重新执行 `Launch Airi Desktop Pet` 命令（服务器在线时会提示"已经在运行"，
+此时关掉桌宠进程重新启动，或直接运行 `python desktop_pet/standalone.py` 再开一个）。
 
 ### Q: 拖拽时窗口跳到屏幕左上角？
 
@@ -219,11 +264,11 @@ POST /event
 
 ### Q: 气泡不显示？
 
-检查 VS Code 开发者控制台是否有 SSE 连接错误。桌宠窗口会自动重连。
+桌宠窗口会自动重连 SSE。确认 19876 端口没被占用：`netstat -ano | findstr 19876`。
 
-### Q: 如何换掉 "A" 头像？
+### Q: 如何换掉默认角色？
 
-编辑 `desktop_pet/ui.html`，将 `.avatar` 内的 `A` 替换为 `<img src="your_image.png">`。
+把你的立绘放到 `desktop_pet/assets/character.png`（支持可选的情绪变体，见上文）。
 
 ---
 
@@ -235,6 +280,9 @@ npm run compile
 
 # 监听模式
 npm run watch
+
+# 代码检查
+npm run lint
 
 # 运行测试
 npm test
@@ -251,4 +299,7 @@ vsce package
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | 0.1.0 | 2026-06-23 | 傲娇人格、聊天气泡 UI、Python 后端、DeepSeek API 预留 |
-| 0.2.0 | 2026-06-24 | **方案 B 混合架构**：桌面宠物窗口（pywebview + SSE）、可拖拽透明窗口、VS Code 插件 + 独立桌宠双模 |
+| 0.2.0 | 2026-07-19 | **独立桌宠架构**：standalone.py 内置服务器 + SSE + pywebview，watcher.py 独立文件监听，情绪立绘系统 |
+| 0.2.1 | 2026-09-13 | 重建丢失的 common.py（修复启动崩溃）、`Launch Airi Desktop Pet` 一键启动命令、健康探测、Webview 转义修复 |
+
+详见 [CHANGELOG.md](CHANGELOG.md)。
