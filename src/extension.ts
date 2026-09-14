@@ -98,47 +98,83 @@ export function deactivate() {
 // handleDiagnosticsChanged()
 // ============================================================================
 
-function handleDiagnosticsChanged(uris: readonly vscode.Uri[]): void {
-	const errors = uris.flatMap((uri) => {
-		const document = vscode.workspace.textDocuments.find((doc) => doc.uri.toString() === uri.toString());
-		if (!document || !supportedLanguageIds.has(document.languageId)) { return []; }
+/** 上次推送到桌宠的内容签名（相同内容不重复推送） */
+let lastPushSignature = '';
 
-		return vscode.languages.getDiagnostics(uri)
-			.filter((d) => d.severity === vscode.DiagnosticSeverity.Error)
-			.map((d) => ({
+interface ErrorItem {
+	file: string;
+	languageId: string;
+	message: string;
+	source: string;
+	line: number;
+	character: number;
+}
+
+/** 收集诊断错误。传入 uris 时只收集这些文件，否则收集整个工作区 */
+function collectErrors(uris?: readonly vscode.Uri[]): ErrorItem[] {
+	const targets = uris ? new Set(uris.map((u) => u.toString())) : undefined;
+	const items: ErrorItem[] = [];
+	for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
+		if (targets && !targets.has(uri.toString())) { continue; }
+		const document = vscode.workspace.textDocuments.find((doc) => doc.uri.toString() === uri.toString());
+		if (!document || !supportedLanguageIds.has(document.languageId)) { continue; }
+		for (const d of diagnostics) {
+			if (d.severity !== vscode.DiagnosticSeverity.Error) { continue; }
+			items.push({
 				file: uri.fsPath,
 				languageId: document.languageId,
 				message: d.message,
 				source: d.source ?? 'unknown',
 				line: d.range.start.line + 1,
 				character: d.range.start.character + 1,
-			}));
-	});
+			});
+		}
+	}
+	return items;
+}
+
+function handleDiagnosticsChanged(uris: readonly vscode.Uri[]): void {
+	const changedErrors = collectErrors(uris);
 
 	// 发送到 Webview 备用面板
 	postToWebview({
 		type: 'diagnostics',
-		payload: { count: errors.length, items: errors, timestamp: new Date().toISOString() }
+		payload: { count: changedErrors.length, items: changedErrors, timestamp: new Date().toISOString() }
 	});
 
 	// 推送到独立桌宠服务器（未运行时静默跳过，避免刷无意义请求）
 	void (async () => {
 		if (!(await checkStandaloneAlive())) { return; }
-		if (errors.length > 0) {
-			pushToStandalone({
-				type: 'diagnostics',
-				payload: { count: errors.length, items: errors, timestamp: new Date().toISOString() }
-			});
-		} else {
-			// all_clear — 错误清零时也通知桌宠
-			pushToStandalone({
-				trigger: 'all_clear',
+
+		// all_clear 必须按工作区整体判断：
+		// 本次变化的文件没错误 ≠ 全部修好，其他文件可能还有错误
+		const workspaceErrors = collectErrors();
+		const message = workspaceErrors.length > 0
+			? {
+				type: 'diagnostics' as const,
+				payload: {
+					count: workspaceErrors.length,
+					items: workspaceErrors.slice(0, 20),
+					timestamp: new Date().toISOString(),
+				},
+			}
+			: {
+				trigger: 'all_clear' as const,
 				error_count: 0,
 				language: 'unknown',
 				files: [],
-				sample_errors: []
-			});
-		}
+				sample_errors: [],
+			};
+
+		// 相同错误状态不重复推送（避免每次诊断事件都让 Airi 重复吐槽）
+		const signature = JSON.stringify([
+			(message as { type?: string }).type ?? (message as { trigger?: string }).trigger,
+			workspaceErrors.map((e) => `${e.file}|${e.line}|${e.message}`),
+		]);
+		if (signature === lastPushSignature) { return; }
+		lastPushSignature = signature;
+
+		pushToStandalone(message);
 	})();
 }
 

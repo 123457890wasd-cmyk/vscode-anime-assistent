@@ -16,7 +16,7 @@ suite('Extension Test Suite', () => {
 	 * 验证扩展已正确激活并注册了命令
 	 */
 	test('Extension should be activated', async () => {
-		const ext = vscode.extensions.getExtension('Mr.hancard.vscode-anime-assistent');
+		const ext = vscode.extensions.getExtension('123457890wasd-cmyk.vscode-anime-assistent');
 		assert.ok(ext, 'Extension not found');
 
 		if (!ext.isActive) {
@@ -46,6 +46,18 @@ suite('Extension Test Suite', () => {
 			commands.includes('vscode-anime-assistent.openAssistant'),
 			true,
 			'openAssistant command not registered'
+		);
+	});
+
+	/**
+	 * 验证 launchPet 命令已注册
+	 */
+	test('launchPet command should be registered', async () => {
+		const commands = await vscode.commands.getCommands(true);
+		assert.strictEqual(
+			commands.includes('vscode-anime-assistent.launchPet'),
+			true,
+			'launchPet command not registered'
 		);
 	});
 

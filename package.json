@@ -2,7 +2,12 @@
   "name": "vscode-anime-assistent",
   "displayName": "airi-monitor",
   "description": "Anime desktop pet for VS Code — tsundere Airi watches your code and roasts your bugs",
-  "version": "0.2.1",
+  "version": "0.2.2",
+  "publisher": "123457890wasd-cmyk",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/123457890wasd-cmyk/vscode-anime-assistent.git"
+  },
   "engines": {
     "vscode": "^1.110.0"
   },

@@ -35,15 +35,20 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 # ---------------------------------------------------------------------------
 # SSE 消息队列（线程安全，有上限防内存泄漏）
+# 每条消息带递增序号：队列裁剪后客户端仍按序号取新消息，不会错位
 # ---------------------------------------------------------------------------
 MAX_QUEUE_SIZE = 200
-sse_queue = []
+SSE_REPLAY_COUNT = 20   # 新连接重播最近的消息数（含启动问候）
+sse_queue = []          # [(seq, json_str)]
+_seq = 0
 queue_lock = threading.Lock()
 
 def push_message(msg_type: str, text: str, emotion: str = "idle"):
     """向 SSE 客户端推送消息。超过上限时丢弃最旧的消息。"""
+    global _seq
     with queue_lock:
-        sse_queue.append((msg_type, json.dumps(
+        _seq += 1
+        sse_queue.append((_seq, json.dumps(
             {"type": msg_type, "payload": {"text": text, "emotion": emotion}},
             ensure_ascii=False
         )))
@@ -66,22 +71,28 @@ class AiriHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(b':ok\n\n')
-            last_idx = 0
+            last_seq = 0
             try:
+                # 新连接先重播最近几条（让刚打开的窗口能看到问候语）
+                with queue_lock:
+                    replay = sse_queue[-SSE_REPLAY_COUNT:]
+                    if replay:
+                        last_seq = replay[-1][0]
+                for _seq_no, d in replay:
+                    self.wfile.write(f'data: {d}\n\n'.encode('utf-8'))
+                self.wfile.flush()
                 while True:
+                    time.sleep(0.3)
                     with queue_lock:
-                        new_msgs = sse_queue[last_idx:]
-                        last_idx = len(sse_queue)
-                        if last_idx > MAX_QUEUE_SIZE:
-                            del sse_queue[:last_idx - MAX_QUEUE_SIZE // 2]
-                            last_idx = len(sse_queue)
-                    for mt, d in new_msgs:
+                        new_msgs = [(s, d) for (s, d) in sse_queue if s > last_seq]
+                        if new_msgs:
+                            last_seq = new_msgs[-1][0]
+                    for _seq_no, d in new_msgs:
                         try:
                             self.wfile.write(f'data: {d}\n\n'.encode('utf-8'))
                             self.wfile.flush()
                         except Exception:
                             return
-                    time.sleep(0.3)
             except Exception:
                 pass
         elif self.path == '/ping':
@@ -107,13 +118,22 @@ class AiriHandler(BaseHTTPRequestHandler):
                 push_message(t, tx, em)
             elif msg.get('type') == 'diagnostics' and 'payload' in msg:
                 p = msg['payload']
-                ctx = {'trigger': p.get('trigger', 'diagnostics'), 'error_count': p.get('count', 0), 'language': 'unknown', 'sample_errors': p.get('items', [])[:5]}
+                ctx = {
+                    'trigger': p.get('trigger', 'diagnostics'),
+                    'error_count': p.get('count', 0),
+                    'language': p.get('language', 'unknown'),
+                    'sample_errors': p.get('items', [])[:5],
+                }
                 if _backend_available:
                     r = generate_response(ctx)
                     if r:
                         push_message(r.get('type', 'chatMessage'), r.get('payload', {}).get('text', ''), r.get('payload', {}).get('emotion', 'idle'))
                 else:
-                    push_message('errorAlert' if ctx['error_count'] > 0 else 'chatMessage', '...' if ctx['error_count'] > 0 else '...', 'angry' if ctx['error_count'] > 0 else 'happy')
+                    # 后端不可用时的内置兜底台词
+                    if ctx['error_count'] > 0:
+                        push_message('errorAlert', f"喂！{ctx['error_count']} 个错误！给我认真点检查！", 'angry')
+                    else:
+                        push_message('chatMessage', '哼，全部修好了…算你厉害。', 'happy')
             elif 'trigger' in msg or 'error_count' in msg:
                 if _backend_available:
                     r = generate_response(msg)

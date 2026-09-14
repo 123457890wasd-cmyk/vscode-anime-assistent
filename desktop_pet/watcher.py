@@ -17,6 +17,7 @@ watcher.py — 独立文件监听器
 
 import sys
 import os
+import re
 import time
 import json
 import subprocess
@@ -30,26 +31,35 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 def check_python(filepath: str) -> list:
-    """对 Python 文件运行语法检查，返回错误列表"""
+    """对 Python 文件运行语法检查，返回错误列表。
+
+    py_compile 遇到第一个语法错误即退出，所以最多返回一条错误。
+    stderr 形如:
+      File "x.py", line 3
+        print('foo'
+                 ^
+    SyntaxError: '(' was never closed
+    """
     errors = []
     try:
         result = subprocess.run(
             [sys.executable, '-m', 'py_compile', filepath],
             capture_output=True, text=True, timeout=10
         )
-        stderr = result.stderr.strip()
-        if stderr:
-            # 解析典型的 Python 错误输出: File "...", line N\n    code\nSyntaxError: msg
-            for line in stderr.split('\n'):
-                line = line.strip()
-                if line and not line.startswith('File ') and not line.startswith('^'):
-                    errors.append({
-                        'file': filepath,
-                        'message': line,
-                        'line': _extract_line(stderr),
-                        'languageId': 'python',
-                        'source': 'python'
-                    })
+        if result.returncode == 0:
+            return errors
+        stderr = result.stderr or ''
+        lines = [line.strip() for line in stderr.split('\n') if line.strip()]
+        # 最后一行是异常摘要（SyntaxError: ... / IndationError: ... 等）
+        summary = lines[-1] if lines else 'SyntaxError: unknown error'
+        m = re.search(r'line (\d+)', stderr)
+        errors.append({
+            'file': filepath,
+            'message': summary,
+            'line': int(m.group(1)) if m else 0,
+            'languageId': 'python',
+            'source': 'python'
+        })
     except Exception as e:
         errors.append({
             'file': filepath, 'message': str(e), 'line': 0,
@@ -59,9 +69,11 @@ def check_python(filepath: str) -> list:
 
 
 def check_c(filepath: str) -> list:
-    """对 C 文件运行语法检查"""
+    """对 C/C++ 文件运行语法检查"""
     ext = os.path.splitext(filepath)[1]
-    compiler = 'g++' if ext in ('.cpp', '.cxx', '.cc') else 'gcc'
+    is_cpp = ext in ('.cpp', '.cxx', '.cc')
+    compiler = 'g++' if is_cpp else 'gcc'
+    language_id = 'cpp' if is_cpp else 'c'
     errors = []
     try:
         result = subprocess.run(
@@ -77,7 +89,7 @@ def check_c(filepath: str) -> list:
                         'file': filepath,
                         'message': line,
                         'line': _extract_line(line),
-                        'languageId': 'c',
+                        'languageId': language_id,
                         'source': compiler
                     })
     except FileNotFoundError:
@@ -85,15 +97,14 @@ def check_c(filepath: str) -> list:
     except Exception as e:
         errors.append({
             'file': filepath, 'message': str(e), 'line': 0,
-            'languageId': 'c', 'source': compiler
+            'languageId': language_id, 'source': compiler
         })
     return errors
 
 
 def _extract_line(text: str) -> int:
     """从错误文本中提取行号"""
-    import re
-    # 匹配 "line 42" 或 ":42:" 或 ", line 42"
+    # 匹配 "line 42" 或 ":42:"（gcc 格式 file.c:42:5: error: ...）
     m = re.search(r'(?:line\s+|:)(\d+)', text)
     return int(m.group(1)) if m else 0
 
@@ -119,8 +130,9 @@ def watch_directory(watch_dir: str, port: int):
         sys.exit(1)
 
     push_url = f'http://127.0.0.1:{port}/push'
-    mtimes = {}  # 文件路径 → 上次修改时间
-    last_error_count = 0
+    mtimes = {}        # 文件路径 → 上次修改时间
+    known_errors = {}  # 文件路径 → 该文件最近一次检查出的错误（用于整体错误统计）
+    last_signature = None
 
     print(f'[watcher] Watching: {watch_path}', flush=True)
     print(f'[watcher] Push target: {push_url}', flush=True)
@@ -130,7 +142,7 @@ def watch_directory(watch_dir: str, port: int):
     while True:
         try:
             changed_files = []
-            all_current_errors = []
+            seen = set()
 
             # 扫描所有支持的文件
             for ext in SUPPORTED:
@@ -139,68 +151,81 @@ def watch_directory(watch_dir: str, port: int):
                     if any(part.startswith('.') or part in ('node_modules', 'venv', '__pycache__', 'build', 'dist', '.git')
                            for part in f.parts):
                         continue
+                    key = str(f)
+                    seen.add(key)
                     try:
                         current_mtime = f.stat().st_mtime
-                        prev_mtime = mtimes.get(str(f), 0)
+                        prev_mtime = mtimes.get(key, 0)
                         if current_mtime > prev_mtime:
-                            changed_files.append(str(f))
-                        mtimes[str(f)] = current_mtime
+                            changed_files.append(key)
+                        mtimes[key] = current_mtime
                     except OSError:
                         pass
 
-            # 对变化的文件运行语法检查（每个文件使用自己的检查器）
+            # 文件被删除/移走时清理其错误缓存
+            for key in list(known_errors):
+                if key not in seen:
+                    del known_errors[key]
+
+            # 对变化的文件运行语法检查并更新缓存
             for f in changed_files:
                 ext = os.path.splitext(f)[1].lower()
                 checker = CHECKERS.get(ext)
                 if checker is None:
+                    known_errors.pop(f, None)
                     continue
-                errors = checker(f)
-                all_current_errors.extend(errors)
+                known_errors[f] = checker(f)
 
+            # 整体错误状态 = 所有已检查文件的错误之和
+            # （保存一个干净文件不能触发 all_clear，其他文件可能还有错误）
+            all_current_errors = [e for errs in known_errors.values() for e in errs]
             error_count = len(all_current_errors)
 
-            # 避免重复发送相同错误数
-            if error_count != last_error_count or changed_files:
-                last_error_count = error_count
-
-                # 构建诊断消息
-                if error_count > 0:
-                    langs = set(e.get('languageId', '') for e in all_current_errors)
-                    language = ', '.join(langs) if langs else 'unknown'
-
-                    payload = {
-                        'type': 'diagnostics',
-                        'payload': {
-                            'count': error_count,
-                            'items': all_current_errors[:10],
-                            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
-                            'language': language,
-                        }
+            if error_count > 0:
+                langs = set(e.get('languageId', '') for e in all_current_errors)
+                language = ', '.join(langs) if langs else 'unknown'
+                payload = {
+                    'type': 'diagnostics',
+                    'payload': {
+                        'count': error_count,
+                        'items': all_current_errors[:10],
+                        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                        'language': language,
                     }
-                else:
-                    payload = {
-                        'trigger': 'all_clear',
-                        'error_count': 0,
-                        'language': 'unknown',
-                        'files': [],
-                        'sample_errors': [],
-                    }
+                }
+            else:
+                payload = {
+                    'trigger': 'all_clear',
+                    'error_count': 0,
+                    'language': 'unknown',
+                    'files': [],
+                    'sample_errors': [],
+                }
 
-                # 推送到桌宠
-                try:
-                    data = json.dumps(payload, ensure_ascii=False).encode()
-                    req = urllib.request.Request(
-                        push_url, data=data,
-                        headers={'Content-Type': 'application/json'}
-                    )
-                    urllib.request.urlopen(req, timeout=3)
-                    if error_count > 0:
-                        files_str = ', '.join(os.path.basename(f) for f in changed_files)
-                        print(f'[watcher] → {error_count} error(s) in {files_str}', flush=True)
-                    else:
-                        print(f'[watcher] → all clear!', flush=True)
-                except Exception:
-                    pass  # 桌宠服务器未运行，静默跳过
+            # 相同错误状态不重复推送；启动时项目本身干净则不打扰（已有问候语）
+            signature = json.dumps([
+                payload.get('type', payload.get('trigger')),
+                [(e['file'], e['line'], e['message']) for e in all_current_errors[:10]],
+            ], ensure_ascii=False)
+            is_first_scan = last_signature is None
+            if signature != last_signature:
+                last_signature = signature
+                if not (is_first_scan and error_count == 0):
+                    # 推送到桌宠
+                    try:
+                        data = json.dumps(payload, ensure_ascii=False).encode()
+                        req = urllib.request.Request(
+                            push_url, data=data,
+                            headers={'Content-Type': 'application/json'}
+                        )
+                        urllib.request.urlopen(req, timeout=3)
+                        if error_count > 0:
+                            files_str = ', '.join(os.path.basename(f) for f in changed_files) or '(cached)'
+                            print(f'[watcher] → {error_count} error(s) [{files_str}]', flush=True)
+                        else:
+                            print(f'[watcher] → all clear!', flush=True)
+                    except Exception:
+                        pass  # 桌宠服务器未运行，静默跳过
 
             time.sleep(1.5)  # 轮询间隔
 

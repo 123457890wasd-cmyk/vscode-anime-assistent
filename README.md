@@ -3,7 +3,7 @@
 > **Airi（愛莉）** — 一个傲娇的二次元桌宠，陪伴你在 VS Code 中写代码。
 > 她会监控你的 C/C++/Python 编译错误，用毒舌又暖心的方式吐槽你的 bug。
 
-当前版本：**v0.2.1**
+当前版本：**v0.2.2**
 
 ---
 
@@ -301,5 +301,6 @@ vsce package
 | 0.1.0 | 2026-06-23 | 傲娇人格、聊天气泡 UI、Python 后端、DeepSeek API 预留 |
 | 0.2.0 | 2026-07-19 | **独立桌宠架构**：standalone.py 内置服务器 + SSE + pywebview，watcher.py 独立文件监听，情绪立绘系统 |
 | 0.2.1 | 2026-09-13 | 重建丢失的 common.py（修复启动崩溃）、`Launch Airi Desktop Pet` 一键启动命令、健康探测、Webview 转义修复 |
+| 0.2.2 | 2026-09-14 | all_clear 误报修复（双侧）、watcher 错误解析/语言ID修复、SSE 序号防错位、推送去重、补 publisher 字段 |
 
 详见 [CHANGELOG.md](CHANGELOG.md)。

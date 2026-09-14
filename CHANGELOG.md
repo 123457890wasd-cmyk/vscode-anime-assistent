@@ -1,5 +1,23 @@
 # Change Log
 
+## [0.2.2] — 2026-09-14
+
+### Fixed
+- **all_clear 误报**（扩展 + watcher 双侧）：只要本次变化的文件没有错误就发"全部清零"，
+  哪怕其他文件还有错误。现在扩展按工作区整体诊断判断，watcher 按文件缓存错误后汇总判断
+- **watcher.py Python 错误解析**：单个语法错误被 stderr 逐行拆成 2~3 条"错误"导致计数虚高，
+  现在只取异常摘要行（`SyntaxError: ...`），最多返回一条
+- **watcher.py 语言 ID**：`.cpp/.cxx/.cc` 文件报错时 languageId 错标为 `c`，现在正确标为 `cpp`
+- **standalone.py SSE 队列错位**：队列被裁剪后已连接客户端的索引失效，会丢消息或重发消息。
+  改为每条消息带递增序号，客户端按序号取增量；新连接只重播最近 20 条（原来重播整个队列）
+- **重复推送**：相同错误状态不再重复推送到桌宠（扩展侧和 watcher 侧都加了内容签名去重），
+  Airi 不会就同一批错误反复吐槽；watcher 启动时项目本身干净也不再打断问候语
+- **standalone.py**：`language` 字段现在透传给回复生成器（原来硬编码 'unknown'）；
+  Python 后端不可用时的兜底气泡从 `...` 换成有意义的台词
+- **package.json**：补上缺失的 `publisher` 字段（原来 `vsce package` 会直接失败）和 `repository`
+- **extension.test.ts**：扩展 ID 写错（`Mr.hancard.*`），按 publisher 修正；
+  新增 `launchPet` 命令注册测试
+
 ## [0.2.1] — 2026-09-13
 
 ### Added
