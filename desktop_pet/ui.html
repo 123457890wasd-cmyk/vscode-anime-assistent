@@ -531,6 +531,8 @@
       emotionTimer = setTimeout(function() {
         currentEmotion = 'idle';
         charBox.setAttribute('data-emotion', 'idle');
+        // 立绘也要切回默认图，否则会一直停留在情绪变体
+        if (CHAR_IMG && CHAR_IMG.length > 0) charImg.src = CHAR_IMG;
       }, 8000);
     }
 

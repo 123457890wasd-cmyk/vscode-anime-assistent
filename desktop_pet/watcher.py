@@ -241,7 +241,7 @@ def watch_single_file(filepath: str, port: int):
     """监听单个文件的变化"""
     push_url = f'http://127.0.0.1:{port}/push'
     last_mtime = 0
-    last_error_count = 0
+    last_signature = None
 
     ext = os.path.splitext(filepath)[1].lower()
     checker = CHECKERS.get(ext)
@@ -266,37 +266,45 @@ def watch_single_file(filepath: str, port: int):
                 errors = checker(filepath)
                 error_count = len(errors)
 
-                if error_count != last_error_count:
-                    last_error_count = error_count
-
-                    payload = {
-                        'type': 'diagnostics',
-                        'payload': {
-                            'count': error_count,
-                            'items': errors[:10],
-                            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                # 内容签名去重（与目录模式一致）：
+                # 错误数量相同但内容变化时仍然推送；
+                # 启动时文件本身干净则不打扰
+                signature = json.dumps(
+                    [(e['line'], e['message']) for e in errors],
+                    ensure_ascii=False
+                )
+                is_first_check = last_signature is None
+                if signature != last_signature:
+                    last_signature = signature
+                    if not (is_first_check and error_count == 0):
+                        payload = {
+                            'type': 'diagnostics',
+                            'payload': {
+                                'count': error_count,
+                                'items': errors[:10],
+                                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                            }
+                        } if error_count > 0 else {
+                            'trigger': 'all_clear',
+                            'error_count': 0,
+                            'language': 'unknown',
+                            'files': [filepath],
+                            'sample_errors': [],
                         }
-                    } if error_count > 0 else {
-                        'trigger': 'all_clear',
-                        'error_count': 0,
-                        'language': 'unknown',
-                        'files': [filepath],
-                        'sample_errors': [],
-                    }
 
-                    try:
-                        data = json.dumps(payload, ensure_ascii=False).encode()
-                        req = urllib.request.Request(
-                            push_url, data=data,
-                            headers={'Content-Type': 'application/json'}
-                        )
-                        urllib.request.urlopen(req, timeout=3)
-                        if error_count > 0:
-                            print(f'[watcher] {os.path.basename(filepath)}: {error_count} error(s)', flush=True)
-                        else:
-                            print(f'[watcher] {os.path.basename(filepath)}: all clear!', flush=True)
-                    except Exception:
-                        pass
+                        try:
+                            data = json.dumps(payload, ensure_ascii=False).encode()
+                            req = urllib.request.Request(
+                                push_url, data=data,
+                                headers={'Content-Type': 'application/json'}
+                            )
+                            urllib.request.urlopen(req, timeout=3)
+                            if error_count > 0:
+                                print(f'[watcher] {os.path.basename(filepath)}: {error_count} error(s)', flush=True)
+                            else:
+                                print(f'[watcher] {os.path.basename(filepath)}: all clear!', flush=True)
+                        except Exception:
+                            pass
 
             time.sleep(1.5)
 

@@ -1,5 +1,19 @@
 # Change Log
 
+## [0.2.3] — 2026-09-16
+
+### Fixed
+- **错误类别误判**：type 关键词 `"is not"` 排在 name 之前，Python 的
+  `name 'x' is not defined`（NameError）会被误判为 type_error，永远选不到
+  "未定义变量"场景的台词。现在按"具体类别优先"重排（syntax → name → import → type），
+  并补充 `convert` 关键词。12 条真实错误消息分类测试全部通过
+- **watcher.py 单文件模式去重**：原来只比较错误数量，数量相同但错误内容变化时
+  不再推送；改为与目录模式一致的内容签名去重（并保留启动时干净文件不打扰的行为）
+- **ui.html 情绪回落不完整**：情绪 8 秒超时后 CSS 表情恢复 idle，但自定义立绘
+  仍停留在情绪变体图片（如一直显示 character_angry.png），现在同时切回默认立绘
+- **standalone.py 启动问候兜底**：Python 后端不可用时的问候气泡从 `...`
+  换成有内容的台词（上一版只修了 /push 路径，漏了启动路径）
+
 ## [0.2.2] — 2026-09-14
 
 ### Fixed

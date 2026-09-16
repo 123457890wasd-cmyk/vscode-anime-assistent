@@ -33,25 +33,28 @@ def classify_error_category(message: str, source: str = "") -> str:
     """根据错误消息文本推断错误类别"""
     msg_lower = message.lower()
 
+    # 匹配顺序：具体的类别优先。
+    # type 的 "is not" 是宽泛前缀，必须放在 name/import 之后，
+    # 否则 "name 'x' is not defined" 会被误判为类型错误
     syntax_keywords = ["syntax", "invalid syntax", "expected", "unexpected",
                        "missing", "eof", "indentation", "indent", "token"]
     if any(kw in msg_lower for kw in syntax_keywords):
         return "syntax_error"
 
-    type_keywords = ["type", "cannot be", "not assignable", "has no attribute",
-                     "is not", "incompatible", "cast", "conversion"]
-    if any(kw in msg_lower for kw in type_keywords):
-        return "type_error"
+    name_keywords = ["is not defined", "undefined", "unresolved reference",
+                     "cannot find name", "undeclared", "nameerror"]
+    if any(kw in msg_lower for kw in name_keywords):
+        return "name_error"
 
     import_keywords = ["module", "import", "no module named", "cannot find",
                        "unresolved", "could not find", "not found"]
     if any(kw in msg_lower for kw in import_keywords):
         return "import_error"
 
-    name_keywords = ["is not defined", "undefined", "unresolved reference",
-                     "cannot find name", "undeclared", "nameerror"]
-    if any(kw in msg_lower for kw in name_keywords):
-        return "name_error"
+    type_keywords = ["type", "cannot be", "not assignable", "has no attribute",
+                     "is not", "incompatible", "cast", "conversion", "convert"]
+    if any(kw in msg_lower for kw in type_keywords):
+        return "type_error"
 
     return "syntax_error"
 

@@ -219,7 +219,7 @@ def main():
         from response_generator import pick_corpus
         push_message('chatMessage', pick_corpus('greeting'), 'greeting')
     else:
-        push_message('chatMessage', '...', 'greeting')
+        push_message('chatMessage', '哼，我上线了。有错误我会骂你的，给我认真写！', 'greeting')
     print('[airi-standalone] Desktop pet starting...', flush=True)
     webview.start(debug=False)
 
