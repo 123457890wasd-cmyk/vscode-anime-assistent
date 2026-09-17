@@ -4,7 +4,8 @@ standalone.py — Airi 桌面宠物独立启动器
 一键启动：python standalone.py
 不依赖 VS Code 扩展，内置 SSE 服务器 + pywebview 窗口。
 
-可选：VS Code 扩展可向 http://127.0.0.1:19876/push POST 消息来推送诊断事件。
+可选：VS Code 扩展可向 http://127.0.0.1:<port>/push POST 消息来推送诊断事件
+（端口默认 19876，可用环境变量 AIRI_STANDALONE_PORT 覆盖）。
 """
 
 import sys
@@ -25,9 +26,9 @@ if _backend_dir not in sys.path:
 try:
     from response_generator import generate_response
     _backend_available = True
-except Exception:
+except Exception as e:
     _backend_available = False
-    print('[airi-standalone] WARNING: Python backend not available')
+    print(f'[airi-standalone] WARNING: Python backend not available: {e!r}')
 
 # 多线程 HTTP 服务器
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -170,28 +171,41 @@ class AiriHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
 
-def start_server(port: int):
+def start_server(port: int, ready: threading.Event):
     try:
         server = ThreadingHTTPServer(('127.0.0.1', port), AiriHandler)
-        print(f'[airi-standalone] HTTP server on http://127.0.0.1:{port}', flush=True)
-        server.serve_forever()
     except Exception as e:
         print(f'[airi-standalone] HTTP server ERROR: {e}', flush=True)
+        return
+    print(f'[airi-standalone] HTTP server on http://127.0.0.1:{port}', flush=True)
+    ready.set()
+    server.serve_forever()
+
+def _ping_ok(port: int) -> bool:
+    """探测端口上是否已有 Airi 服务器在运行（/ping 返回 200）"""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/ping', timeout=1.5) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
 
 def main():
-    PORT = 19876
-    server_thread = threading.Thread(target=start_server, args=(PORT,), daemon=True)
+    try:
+        PORT = int(os.environ.get('AIRI_STANDALONE_PORT', '') or 19876)
+    except ValueError:
+        PORT = 19876
+    server_ready = threading.Event()
+    server_thread = threading.Thread(target=start_server, args=(PORT, server_ready), daemon=True)
     server_thread.start()
-    time.sleep(1.0)
-    import socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_ready = sock.connect_ex(('127.0.0.1', PORT)) == 0
-    sock.close()
-    if not server_ready:
-        print(f'[airi-standalone] WARNING: HTTP server not ready on port {PORT}', flush=True)
-        time.sleep(2.0)
-    else:
-        print(f'[airi-standalone] HTTP server confirmed on port {PORT}', flush=True)
+    if not server_ready.wait(timeout=5.0):
+        # 绑定失败：区分「已有 Airi 实例」和「端口被无关程序占用」，
+        # 两种情况都不能继续开窗（否则会弹出一个连不上自己服务器的僵尸窗口）
+        if _ping_ok(PORT):
+            print(f'[airi-standalone] Airi is already running on port {PORT}, exit.', flush=True)
+            sys.exit(0)
+        print(f'[airi-standalone] Port {PORT} is occupied by another program, exit.', flush=True)
+        sys.exit(1)
     char_img = find_character_image()
     if char_img:
         print(f'[airi-standalone] Using character image: {char_img}')

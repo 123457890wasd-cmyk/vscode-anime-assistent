@@ -481,7 +481,7 @@
 
   <!-- 右键菜单 -->
   <div class="context-menu" id="contextMenu">
-    <div class="menu-item" data-action="hide">隐藏 Airi</div>
+    <div class="menu-item" data-action="exit">退出 Airi</div>
   </div>
 
   <script>
@@ -660,8 +660,8 @@
     document.addEventListener('click', function() { contextMenu.classList.remove('show'); });
     contextMenu.addEventListener('click', function(e) {
       var a = e.target.getAttribute('data-action');
-      if (a === 'hide') {
-        try { if (window.pywebview && window.pywebview.api) window.pywebview.api.hide_window(); } catch (err) {}
+      if (a === 'exit') {
+        try { if (window.pywebview && window.pywebview.api) window.pywebview.api.exit_app(); } catch (err) {}
       }
       contextMenu.classList.remove('show');
     });

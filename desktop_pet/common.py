@@ -10,6 +10,7 @@ common.py — Airi 桌宠共用工具
 """
 
 import ctypes
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -71,12 +72,13 @@ class WindowAPI:
             except Exception:
                 pass
 
-    def hide_window(self):
-        if self._window is not None:
-            try:
-                self._window.hide()
-            except Exception:
-                pass
+    def exit_app(self):
+        """销毁窗口并退出进程（webview.start 返回后主线程结束，daemon 线程随之退出）"""
+        try:
+            if self._window is not None:
+                self._window.destroy()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +86,16 @@ class WindowAPI:
 # ---------------------------------------------------------------------------
 
 def find_character_image():
-    """查找自定义立绘，找不到返回 None（ui.html 会退回 CSS 角色）。"""
+    """查找自定义立绘，找不到返回 None（ui.html 会退回 CSS 角色）。
+
+    优先级：AIRI_CHARACTER_IMAGE 环境变量 > assets/character.* > 根目录 character.png
+    """
+    env_path = os.environ.get('AIRI_CHARACTER_IMAGE', '').strip()
+    if env_path:
+        p = Path(env_path)
+        if p.is_file():
+            return str(p)
+        print(f'[airi-common] WARNING: AIRI_CHARACTER_IMAGE not found: {env_path}')
     for name in ('character.png', 'character.gif', 'character.webp'):
         p = _SCRIPT_DIR / 'assets' / name
         if p.is_file():
