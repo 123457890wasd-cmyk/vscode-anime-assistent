@@ -1,13 +1,13 @@
 """
 main.py - Airi 桌面宠物入口（pywebview 窗口）
 
-通过 SSE 连接到 VS Code 扩展的 HTTP 服务器，接收消息并显示为
-可拖动的透明无边框桌面窗口。
+通过 SSE 连接到 Airi 桌宠服务器（standalone.py，v0.2 起扩展内不再内置
+HTTP 服务器），接收消息并显示为可拖动的透明无边框桌面窗口。
 
 【运行方式】
   python main.py --port <PORT>
-  
-  PORT: VS Code 扩展 HTTP 服务器的端口号
+
+  PORT: Airi 桌宠服务器端口（standalone.py，默认 19876）
 
 【依赖】
   pip install pywebview

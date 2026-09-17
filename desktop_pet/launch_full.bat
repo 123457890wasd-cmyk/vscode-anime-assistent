@@ -5,7 +5,7 @@ if "%PYTHON%"=="" set PYTHON=python
 
 cd /d "%~dp0."
 echo ============================================
-echo   Airi Desktop Pet - ÍêÕûÆô¶¯
+echo   Airi Desktop Pet - å®Œæ•´å¯åŠ¨
 echo ============================================
 echo.
 

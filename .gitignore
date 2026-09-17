@@ -18,7 +18,6 @@ __pycache__/
 # 操作系统
 Thumbs.db
 Desktop.ini
-$null
 
 # 本地 VS Code 配置
 .vscode/c_cpp_properties.json
