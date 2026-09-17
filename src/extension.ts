@@ -39,8 +39,8 @@ let extensionRoot = '';
  */
 const supportedLanguageIds = new Set(['c', 'cpp', 'python']);
 
-/** 独立桌宠服务器 (standalone.py) 端口 */
-const STANDALONE_PORT = 19876;
+/** 独立桌宠服务器 (standalone.py) 端口（可用环境变量 AIRI_STANDALONE_PORT 覆盖） */
+const STANDALONE_PORT = Number(process.env.AIRI_STANDALONE_PORT) || 19876;
 
 /** 桌宠服务器健康状态缓存（避免每次诊断变化都探测） */
 let standaloneHealthy = false;
@@ -67,23 +67,19 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(helloCommand, openAssistantCommand, launchPetCommand);
 
-	// --- Webview 面板（可选备用显示） ---
-	createOrShowAssistantPanel(context);
-
 	// --- 诊断监听 ---
-	// 当语言服务器 / linter 检测到错误时触发
-	const diagnosticsDisposable = vscode.languages.onDidChangeDiagnostics((event) => {
-		handleDiagnosticsChanged(event.uris);
+	// 当语言服务器 / linter 检测到错误时触发（始终按工作区整体统计）
+	const diagnosticsDisposable = vscode.languages.onDidChangeDiagnostics(() => {
+		handleDiagnosticsChanged();
 	});
 	context.subscriptions.push(diagnosticsDisposable);
 
-	// --- 启动时扫描已有诊断 ---
-	for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
-		if (diagnostics.length > 0) { handleDiagnosticsChanged([uri]); }
-	}
+	// --- 启动时扫描已有诊断（有错误才处理，干净启动不打扰） ---
+	// Webview 诊断面板改为按需打开：命令 "Open Anime Assistant"
+	if (collectErrors().length > 0) { handleDiagnosticsChanged(); }
 
 	vscode.window.showInformationMessage('Airi Monitor 已就绪 — 诊断消息将转发到桌宠');
-	console.log('[airi-monitor] Ready. Push target: http://127.0.0.1:19876/push');
+	console.log(`[airi-monitor] Ready. Push target: http://127.0.0.1:${STANDALONE_PORT}/push`);
 }
 
 // ============================================================================
@@ -101,6 +97,9 @@ export function deactivate() {
 /** 上次推送到桌宠的内容签名（相同内容不重复推送） */
 let lastPushSignature = '';
 
+/** 工作区是否出现过受支持的错误（从未出过错时不推 all_clear） */
+let hadRelevantErrors = false;
+
 interface ErrorItem {
 	file: string;
 	languageId: string;
@@ -110,19 +109,31 @@ interface ErrorItem {
 	character: number;
 }
 
-/** 收集诊断错误。传入 uris 时只收集这些文件，否则收集整个工作区 */
+/** 从文件路径推断语言 ID（用于未在编辑器中打开、拿不到 languageId 的文件） */
+function inferLanguageFromPath(fsPath: string): string {
+	const ext = path.extname(fsPath).toLowerCase();
+	if (ext === '.py' || ext === '.pyi') { return 'python'; }
+	if (ext === '.c') { return 'c'; }
+	if (['.cpp', '.cc', '.cxx', '.c++', '.h', '.hpp', '.hh', '.hxx'].includes(ext)) { return 'cpp'; }
+	return '';
+}
+
+/** 收集诊断错误。传入 uris 时只收集这些文件，否则收集整个工作区。
+ * 注意：语言服务器对已关闭文件的诊断仍保留在 getDiagnostics() 里，
+ * 不能因为文档未打开就跳过，否则关掉报错文件会被误判为「全部修好」。 */
 function collectErrors(uris?: readonly vscode.Uri[]): ErrorItem[] {
 	const targets = uris ? new Set(uris.map((u) => u.toString())) : undefined;
 	const items: ErrorItem[] = [];
 	for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
 		if (targets && !targets.has(uri.toString())) { continue; }
 		const document = vscode.workspace.textDocuments.find((doc) => doc.uri.toString() === uri.toString());
-		if (!document || !supportedLanguageIds.has(document.languageId)) { continue; }
+		const languageId = document?.languageId ?? inferLanguageFromPath(uri.fsPath);
+		if (!languageId || !supportedLanguageIds.has(languageId)) { continue; }
 		for (const d of diagnostics) {
 			if (d.severity !== vscode.DiagnosticSeverity.Error) { continue; }
 			items.push({
 				file: uri.fsPath,
-				languageId: document.languageId,
+				languageId,
 				message: d.message,
 				source: d.source ?? 'unknown',
 				line: d.range.start.line + 1,
@@ -133,22 +144,25 @@ function collectErrors(uris?: readonly vscode.Uri[]): ErrorItem[] {
 	return items;
 }
 
-function handleDiagnosticsChanged(uris: readonly vscode.Uri[]): void {
-	const changedErrors = collectErrors(uris);
+function handleDiagnosticsChanged(): void {
+	// all_clear 必须按工作区整体判断：
+	// 本次变化的文件没错误 ≠ 全部修好，其他文件（包括已关闭但语言服务器
+	// 仍在跟踪的文件）可能还有错误
+	const workspaceErrors = collectErrors();
+	if (workspaceErrors.length > 0) { hadRelevantErrors = true; }
 
-	// 发送到 Webview 备用面板
+	// 发送到 Webview 备用面板（同样使用工作区整体口径，避免误导）
 	postToWebview({
 		type: 'diagnostics',
-		payload: { count: changedErrors.length, items: changedErrors, timestamp: new Date().toISOString() }
+		payload: { count: workspaceErrors.length, items: workspaceErrors.slice(0, 20), timestamp: new Date().toISOString() }
 	});
 
 	// 推送到独立桌宠服务器（未运行时静默跳过，避免刷无意义请求）
 	void (async () => {
 		if (!(await checkStandaloneAlive())) { return; }
+		// 从未出现过受支持的错误时不推 all_clear（例如无关语言的诊断事件）
+		if (workspaceErrors.length === 0 && !hadRelevantErrors) { return; }
 
-		// all_clear 必须按工作区整体判断：
-		// 本次变化的文件没错误 ≠ 全部修好，其他文件可能还有错误
-		const workspaceErrors = collectErrors();
 		const message = workspaceErrors.length > 0
 			? {
 				type: 'diagnostics' as const,
@@ -156,6 +170,7 @@ function handleDiagnosticsChanged(uris: readonly vscode.Uri[]): void {
 					count: workspaceErrors.length,
 					items: workspaceErrors.slice(0, 20),
 					timestamp: new Date().toISOString(),
+					language: [...new Set(workspaceErrors.map((e) => e.languageId))].join(', '),
 				},
 			}
 			: {
