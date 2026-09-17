@@ -22,6 +22,7 @@ response_generator.py — 回复生成器
 import os
 import random
 import json
+from typing import Optional
 from corpus import (
     SYNTAX_ERROR, TYPE_ERROR, IMPORT_ERROR, NAME_ERROR,
     MANY_ERRORS, ALL_CLEAR, GREETING, IDLE, ENCOURAGE,
@@ -96,7 +97,7 @@ def pick_corpus(category: str, variables: dict = None) -> str:
     return text
 
 
-def try_deepseek_api(context: dict) -> str | None:
+def try_deepseek_api(context: dict) -> Optional[str]:
     """尝试调用 DeepSeek API 生成回复。失败返回 None。"""
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     if not api_key:
