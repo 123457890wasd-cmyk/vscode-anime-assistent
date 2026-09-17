@@ -31,36 +31,47 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 def check_python(filepath: str) -> list:
-    """对 Python 文件运行语法检查，返回错误列表。
+    """对 Python 文件做语法检查，返回错误列表。
 
-    py_compile 遇到第一个语法错误即退出，所以最多返回一条错误。
-    stderr 形如:
-      File "x.py", line 3
-        print('foo'
-                 ^
-    SyntaxError: '(' was never closed
+    用进程内 compile() 而非 py_compile 子进程：结果等价（遇到第一个语法
+    错误即停，IndentationError/TabError 也是 SyntaxError 子类），但不会在
+    被监听的项目里写 __pycache__/*.pyc 副作用，也省去子进程开销。
+    错误消息形如 "SyntaxError: '(' was never closed"。
     """
     errors = []
     try:
-        result = subprocess.run(
-            [sys.executable, '-m', 'py_compile', filepath],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0:
-            return errors
-        stderr = result.stderr or ''
-        lines = [line.strip() for line in stderr.split('\n') if line.strip()]
-        # 最后一行是异常摘要（SyntaxError: ... / IndationError: ... 等）
-        summary = lines[-1] if lines else 'SyntaxError: unknown error'
-        m = re.search(r'line (\d+)', stderr)
+        import tokenize
+        with tokenize.open(filepath) as f:  # 按 PEP263 编码声明/UTF-8 读取
+            source = f.read()
+    except SyntaxError as e:
+        # 文件编码声明错误等（读取阶段即可判定）
         errors.append({
             'file': filepath,
-            'message': summary,
-            'line': int(m.group(1)) if m else 0,
+            'message': f'{type(e).__name__}: {e.msg or "unknown error"}',
+            'line': e.lineno or 0,
             'languageId': 'python',
-            'source': 'python'
+            'source': 'python',
+        })
+        return errors
+    except Exception as e:
+        # 文件被删除/占用/解码失败等
+        errors.append({
+            'file': filepath, 'message': str(e), 'line': 0,
+            'languageId': 'python', 'source': 'python'
+        })
+        return errors
+    try:
+        compile(source, filepath, 'exec')
+    except SyntaxError as e:
+        errors.append({
+            'file': filepath,
+            'message': f'{type(e).__name__}: {e.msg or "unknown error"}',
+            'line': e.lineno or 0,
+            'languageId': 'python',
+            'source': 'python',
         })
     except Exception as e:
+        # 例如源码含 null byte（ValueError）
         errors.append({
             'file': filepath, 'message': str(e), 'line': 0,
             'languageId': 'python', 'source': 'python'
@@ -113,7 +124,7 @@ def _extract_line(text: str) -> int:
 # 文件监听器
 # ---------------------------------------------------------------------------
 
-SUPPORTED = {'.py', '.c', '.cpp', '.cxx', '.cc', '.h', '.hpp'}
+SUPPORTED = {'.py', '.c', '.cpp', '.cxx', '.cc'}
 
 CHECKERS = {
     '.py': check_python,
@@ -162,10 +173,11 @@ def watch_directory(watch_dir: str, port: int):
                     except OSError:
                         pass
 
-            # 文件被删除/移走时清理其错误缓存
-            for key in list(known_errors):
-                if key not in seen:
-                    del known_errors[key]
+            # 文件被删除/移走时清理其错误缓存和 mtime 缓存
+            for cache in (known_errors, mtimes):
+                for key in list(cache):
+                    if key not in seen:
+                        del cache[key]
 
             # 对变化的文件运行语法检查并更新缓存
             for f in changed_files:
@@ -218,7 +230,8 @@ def watch_directory(watch_dir: str, port: int):
                             push_url, data=data,
                             headers={'Content-Type': 'application/json'}
                         )
-                        urllib.request.urlopen(req, timeout=3)
+                        with urllib.request.urlopen(req, timeout=3) as resp:
+                            resp.read()
                         if error_count > 0:
                             files_str = ', '.join(os.path.basename(f) for f in changed_files) or '(cached)'
                             print(f'[watcher] → {error_count} error(s) [{files_str}]', flush=True)
@@ -298,7 +311,8 @@ def watch_single_file(filepath: str, port: int):
                                 push_url, data=data,
                                 headers={'Content-Type': 'application/json'}
                             )
-                            urllib.request.urlopen(req, timeout=3)
+                            with urllib.request.urlopen(req, timeout=3) as resp:
+                                resp.read()
                             if error_count > 0:
                                 print(f'[watcher] {os.path.basename(filepath)}: {error_count} error(s)', flush=True)
                             else:
