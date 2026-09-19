@@ -95,7 +95,9 @@ def check_c(filepath: str) -> list:
         if stderr:
             for line in stderr.split('\n'):
                 line = line.strip()
-                if 'error:' in line or 'warning:' in line:
+                # 只推 error 行：warning 属于提示信息，混进错误计数会导致
+                # all_clear 永远不触发（想看警告请用编辑器内诊断）
+                if 'error:' in line:
                     errors.append({
                         'file': filepath,
                         'message': line,
@@ -152,7 +154,7 @@ def watch_directory(watch_dir: str, port: int):
 
     while True:
         try:
-            changed_files = []
+            changed_files = []  # [(路径, 新mtime)]
             seen = set()
 
             # 扫描所有支持的文件
@@ -166,10 +168,10 @@ def watch_directory(watch_dir: str, port: int):
                     seen.add(key)
                     try:
                         current_mtime = f.stat().st_mtime
-                        prev_mtime = mtimes.get(key, 0)
-                        if current_mtime > prev_mtime:
-                            changed_files.append(key)
-                        mtimes[key] = current_mtime
+                        if current_mtime > mtimes.get(key, 0):
+                            changed_files.append((key, current_mtime))
+                            # 注意：mtime 不在此提交——被限流顺延的文件
+                            # 下一轮仍会被判定为变更（提交时机在检查阶段）
                     except OSError:
                         pass
 
@@ -179,14 +181,21 @@ def watch_directory(watch_dir: str, port: int):
                     if key not in seen:
                         del cache[key]
 
-            # 对变化的文件运行语法检查并更新缓存
-            for f in changed_files:
-                ext = os.path.splitext(f)[1].lower()
+            # 对变化的文件运行语法检查并更新缓存。
+            # 每轮限流：git checkout / 切分支等场景几十个文件同时变化时，
+            # 顺序跑几十个编译器子进程（各 10s 超时）会把扫描卡住几分钟
+            MAX_CHECKS_PER_SCAN = 20
+            for key, mtime in changed_files[:MAX_CHECKS_PER_SCAN]:
+                ext = os.path.splitext(key)[1].lower()
                 checker = CHECKERS.get(ext)
                 if checker is None:
-                    known_errors.pop(f, None)
-                    continue
-                known_errors[f] = checker(f)
+                    known_errors.pop(key, None)
+                else:
+                    known_errors[key] = checker(key)
+                mtimes[key] = mtime  # 已检查才提交；顺延的文件下一轮重查
+            if len(changed_files) > MAX_CHECKS_PER_SCAN:
+                print(f'[watcher] {len(changed_files)} file(s) changed, '
+                      f'checking {MAX_CHECKS_PER_SCAN} this round', flush=True)
 
             # 整体错误状态 = 所有已检查文件的错误之和
             # （保存一个干净文件不能触发 all_clear，其他文件可能还有错误）
@@ -215,8 +224,10 @@ def watch_directory(watch_dir: str, port: int):
                 }
 
             # 相同错误状态不重复推送；启动时项目本身干净则不打扰（已有问候语）
+            # 签名包含错误总数：只比对前 10 条会漏掉第 10 条之外的增删
             signature = json.dumps([
                 payload.get('type', payload.get('trigger')),
+                error_count,
                 [(e['file'], e['line'], e['message']) for e in all_current_errors[:10]],
             ], ensure_ascii=False)
             is_first_scan = last_signature is None
@@ -233,7 +244,7 @@ def watch_directory(watch_dir: str, port: int):
                         with urllib.request.urlopen(req, timeout=3) as resp:
                             resp.read()
                         if error_count > 0:
-                            files_str = ', '.join(os.path.basename(f) for f in changed_files) or '(cached)'
+                            files_str = ', '.join(os.path.basename(f) for f, _ in changed_files) or '(cached)'
                             print(f'[watcher] → {error_count} error(s) [{files_str}]', flush=True)
                         else:
                             print(f'[watcher] → all clear!', flush=True)
