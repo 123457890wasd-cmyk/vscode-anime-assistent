@@ -3,7 +3,7 @@
 > **Airi（愛莉）** — 一个傲娇的二次元桌宠，陪伴你在 VS Code 中写代码。
 > 她会监控你的 C/C++/Python 编译错误，用毒舌又暖心的方式吐槽你的 bug。
 
-当前版本：**v0.2.3**
+当前版本：**v0.2.4**
 
 ---
 
@@ -71,7 +71,7 @@
 |------|------|------|
 | VS Code | ≥ 1.110.0 | 扩展运行环境 |
 | Node.js | ≥ 18 | TypeScript 编译（开发扩展时需要） |
-| Python | ≥ 3.10 | `response_generator.py` 使用了 `str \| None` 注解 |
+| Python | ≥ 3.9 | watcher 与后端均兼容 3.9+（3.12 实测） |
 | pywebview | ≥ 4.0 | 桌面宠物窗口 |
 | Windows | 10+ | WebView2 运行时（Win11 已内置） |
 
@@ -169,7 +169,8 @@ vscode-anime-assistent/
     "items": [
       {"file": "main.c", "languageId": "c", "message": "expected ';'", "source": "gcc", "line": 12, "character": 5}
     ],
-    "timestamp": "2026-09-13T22:00:00.000Z"
+    "timestamp": "2026-09-13T22:00:00.000Z",
+    "language": "c"
   }
 }
 ```
@@ -206,7 +207,7 @@ data: {"type":"errorAlert","payload":{"text":"笨蛋！括号都配不对！","e
 - 📌 **始终置顶**：透明无边框，悬浮在所有窗口之上
 - 🫧 **聊天气泡**：打字机效果 + 错误红色边框 + 8 秒自动消失（最多 3 条）
 - 😤 **情绪表情系统**：每条回复带情绪，角色表情自动切换，8 秒后回落 idle
-- 🖱️ **右键菜单**：隐藏 Airi
+- 🖱️ **右键菜单**：退出 Airi（销毁窗口并结束进程，重开用启动命令/脚本）
 - 🔄 **自动重连**：SSE 断线后自动恢复连接
 
 ### 自定义立绘
@@ -233,8 +234,7 @@ data: {"type":"errorAlert","payload":{"text":"笨蛋！括号都配不对！","e
 | 命令 | 说明 |
 |------|------|
 | `Launch Airi Desktop Pet` | 一键启动桌宠（自动查找 Python，启动后确认服务器在线） |
-| `Open Anime Assistant` | 打开 VS Code 内置助手面板（备用显示） |
-| `Hello World` | 检查扩展是否在运行 |
+| `Open Anime Assistant` | 打开 VS Code 内置助手面板（备用显示，按需打开） |
 
 ---
 
@@ -243,14 +243,15 @@ data: {"type":"errorAlert","payload":{"text":"笨蛋！括号都配不对！","e
 ### Q: 桌面宠物没有出现？
 
 1. 确认已安装 pywebview：`pip show pywebview`（注意用你启动时的那个 Python）
-2. 确认 Python ≥ 3.10：`python --version`
+2. 确认 Python ≥ 3.9：`python --version`
 3. 用命令面板 `Launch Airi Desktop Pet` 启动，失败会有具体错误提示
 4. 手动运行 `python desktop_pet/standalone.py` 看控制台报错
 
-### Q: 右键隐藏了 Airi，怎么找回来？
+### Q: 右键退出了 Airi，怎么再打开？
 
-重新执行 `Launch Airi Desktop Pet` 命令（服务器在线时会提示"已经在运行"，
-此时关掉桌宠进程重新启动，或直接运行 `python desktop_pet/standalone.py` 再开一个）。
+重新执行 `Launch Airi Desktop Pet` 命令，或运行 `start.bat` /
+`python desktop_pet/standalone.py`。（v0.2.4 起右键菜单是「退出」而非「隐藏」，
+旧版本隐藏后无法找回，只能结束 python 进程。）
 
 ### Q: 拖拽时窗口跳到屏幕左上角？
 
@@ -303,5 +304,6 @@ vsce package
 | 0.2.1 | 2026-09-13 | 重建丢失的 common.py（修复启动崩溃）、`Launch Airi Desktop Pet` 一键启动命令、健康探测、Webview 转义修复 |
 | 0.2.2 | 2026-09-14 | all_clear 误报修复（双侧）、watcher 错误解析/语言ID修复、SSE 序号防错位、推送去重、补 publisher 字段 |
 | 0.2.3 | 2026-09-16 | 错误分类误判修复（NameError 被错判为类型错误）、单文件 watcher 去重、情绪回落立绘复位 |
+| 0.2.4 | 2026-09-19 | 诊断统计覆盖未打开文档、端口冲突防僵尸窗口、右键「隐藏」改「退出」、watcher 不写 __pycache__/只推 error/变更限流、Py3.9 兼容、环境变量补实现、移除 C_Cpp_Runner 配置与 helloWorld |
 
 详见 [CHANGELOG.md](CHANGELOG.md)。

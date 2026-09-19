@@ -26,18 +26,6 @@ suite('Extension Test Suite', () => {
 	});
 
 	/**
-	 * 验证 helloWorld 命令已注册
-	 */
-	test('helloWorld command should be registered', async () => {
-		const commands = await vscode.commands.getCommands(true);
-		assert.strictEqual(
-			commands.includes('vscode-anime-assistent.helloWorld'),
-			true,
-			'helloWorld command not registered'
-		);
-	});
-
-	/**
 	 * 验证 openAssistant 命令已注册
 	 */
 	test('openAssistant command should be registered', async () => {

@@ -1,5 +1,40 @@
 # Change Log
 
+## [0.2.4] — 2026-09-19
+
+### Fixed
+- **关掉报错文件后误报 all_clear**：`vscode.languages.getDiagnostics()` 会保留已关闭文档的诊断，
+  而旧逻辑只统计打开的文档，关掉报错文件就触发"全部清零"。现在按工作区整体诊断统计；
+  已关闭文档的语言按扩展名推断（.py/.c/.cpp/.h 等）
+- **端口冲突防僵尸窗口**：`AIRI_STANDALONE_PORT` 被占用时启动 standalone.py，
+  现在通过 `_ping_ok()` 区分"已有 Airi 实例"（静默退出）与"无关进程占用端口"（报错退出），
+  不再弹出第二个连不上服务器的桌宠窗口
+- **右键「隐藏 Airi」改为「退出 Airi」**：隐藏后窗口无恢复入口且进程仍占端口，属 UX 陷阱；
+  现在 `exit_app()` 销毁窗口并结束进程，重开用启动命令或脚本
+- **watcher 不再写 `__pycache__`**：Python 检查从 `py_compile` 子进程改为进程内 `compile()`
+  （`tokenize.open` 处理编码声明），检查目录不再生成缓存文件
+- **watcher 只对 gcc error 响应**：原来 warning 也计入错误数，编译警告会打断"全部清零"的判断。
+  现在只收集 `error:` 行
+- **watcher 变更限流**：单轮扫描最多检查 20 个变更文件（MAX_CHECKS_PER_SCAN），
+  git checkout 等大批量变更不再卡住轮询；未检查的文件顺延到下一轮重查（mtime 延迟提交）
+- **watcher 签名含错误数**：内容签名加入 error_count，错误数量变化时能正确触发推送
+- **ui.html 同情绪消息不再吞掉回落计时**：相同情绪连续推送时计时器现在会重置，
+  气泡/表情的 8 秒回落与新消息对齐；无边框窗口上屏蔽 Chromium 默认右键菜单
+- **standalone.py 恶意/异常 Content-Length 防护**：/push 与 /event 的请求头解析包 try/except，
+  非数字不再抛异常中断服务器线程
+- **python_backend Py3.9 兼容**：`str | None` 注解改为 `Optional[str]`，3.9 导入不再崩溃
+- **launch_full.bat 编码修复**：GBK+LF 转为 UTF-8+CRLF，与文件头 `chcp 65001` 匹配
+
+### Changed
+- **环境变量补实现**：`.env.example` 声明的 `AIRI_STANDALONE_PORT`（扩展 + standalone.py 双侧）
+  与 `AIRI_CHARACTER_IMAGE`（立绘路径覆盖）现在真正被代码读取
+- **Webview 面板改为按需打开**：启动时不再自动弹出，用命令 `Open Anime Assistant` 打开
+- **移除 C_Cpp_Runner 本机配置**：`.vscode/settings.json` 与 `launch.json` 中的
+  C_Cpp_Runner 条目（含机器特定编译器路径）从仓库删除，恢复项目可移植性
+- **移除 helloWorld 命令**：扩展命令与对应测试一并删除
+- **`.vscodeignore` 排除 `__pycache__`/`*.pyc`**：vsce 打包不再混入 Python 缓存文件
+- README 对齐实际行为（Python ≥ 3.9、退出菜单、协议示例 language 字段、命令表、FAQ）
+
 ## [0.2.3] — 2026-09-16
 
 ### Fixed

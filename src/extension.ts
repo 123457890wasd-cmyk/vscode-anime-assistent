@@ -56,16 +56,13 @@ export function activate(context: vscode.ExtensionContext) {
 	extensionRoot = context.extensionPath;
 
 	// --- 注册命令 ---
-	const helloCommand = vscode.commands.registerCommand('vscode-anime-assistent.helloWorld', () => {
-		vscode.window.showInformationMessage('Airi Monitor is running — diagnostics are forwarded to the desktop pet.');
-	});
 	const openAssistantCommand = vscode.commands.registerCommand('vscode-anime-assistent.openAssistant', () => {
 		createOrShowAssistantPanel(context);
 	});
 	const launchPetCommand = vscode.commands.registerCommand('vscode-anime-assistent.launchPet', () => {
 		void launchStandalonePet();
 	});
-	context.subscriptions.push(helloCommand, openAssistantCommand, launchPetCommand);
+	context.subscriptions.push(openAssistantCommand, launchPetCommand);
 
 	// --- 诊断监听 ---
 	// 当语言服务器 / linter 检测到错误时触发（始终按工作区整体统计）
