@@ -12,25 +12,6 @@
         "${workspaceFolder}/out/**/*.js"
       ],
       "preLaunchTask": "${defaultBuildTask}"
-    },
-    {
-      "name": "C/C++ Runner: Debug Session",
-      "type": "cppdbg",
-      "request": "launch",
-      "args": [],
-      "stopAtEntry": false,
-      "externalConsole": true,
-      "cwd": "s:/My event/projects/vscode-anime-assistent",
-      "program": "s:/My event/projects/vscode-anime-assistent/build/Debug/outDebug",
-      "MIMode": "gdb",
-      "miDebuggerPath": "gdb",
-      "setupCommands": [
-        {
-          "description": "Enable pretty-printing for gdb",
-          "text": "-enable-pretty-printing",
-          "ignoreFailures": true
-        }
-      ]
     }
   ]
 }
