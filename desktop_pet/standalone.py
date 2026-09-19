@@ -104,7 +104,12 @@ class AiriHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path in ('/push', '/diagnostics'):
-            length = int(self.headers.get('Content-Length', 0))
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+            except (TypeError, ValueError):
+                self.send_response(400)
+                self.end_headers()
+                return
             body = self.rfile.read(length).decode('utf-8')
             try:
                 msg = json.loads(body)
@@ -144,7 +149,12 @@ class AiriHandler(BaseHTTPRequestHandler):
                 push_message('chatMessage', msg.get('message', body), 'idle')
             self._json_response({'status': 'pushed'})
         elif self.path == '/event':
-            length = int(self.headers.get('Content-Length', 0))
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+            except (TypeError, ValueError):
+                self.send_response(400)
+                self.end_headers()
+                return
             body = self.rfile.read(length).decode('utf-8')
             try:
                 msg = json.loads(body)

@@ -505,28 +505,31 @@
 
     // ============ 情绪立绘切换 ============
     function setEmotion(emotion) {
-      if (!emotion || emotion === currentEmotion) return;
-      currentEmotion = emotion;
-      charBox.setAttribute('data-emotion', emotion);
+      if (!emotion) return;
+      if (emotion !== currentEmotion) {
+        currentEmotion = emotion;
+        charBox.setAttribute('data-emotion', emotion);
 
-      // 尝试加载情绪对应图片
-      if (CHAR_IMG && CHAR_IMG.length > 0) {
-        var base = CHAR_IMG.replace(/(\.\w+)$/, '_' + emotion + '$1');
-        var testImg = new Image();
-        testImg.onload = function() {
-          charImg.src = base;
-          charImg.style.display = 'block';
-          cssChar.classList.remove('visible');
-        };
-        testImg.onerror = function() {
-          charImg.src = CHAR_IMG;
-          charImg.style.display = 'block';
-          cssChar.classList.remove('visible');
-        };
-        testImg.src = base;
+        // 尝试加载情绪对应图片
+        if (CHAR_IMG && CHAR_IMG.length > 0) {
+          var base = CHAR_IMG.replace(/(\.\w+)$/, '_' + emotion + '$1');
+          var testImg = new Image();
+          testImg.onload = function() {
+            charImg.src = base;
+            charImg.style.display = 'block';
+            cssChar.classList.remove('visible');
+          };
+          testImg.onerror = function() {
+            charImg.src = CHAR_IMG;
+            charImg.style.display = 'block';
+            cssChar.classList.remove('visible');
+          };
+          testImg.src = base;
+        }
       }
 
-      // 8 秒后恢复默认表情
+      // 8 秒后恢复默认表情（连续同情绪消息也要重置计时，
+      // 否则间隔小于 8s 的第二条很快会被上一条的计时打回 idle）
       clearTimeout(emotionTimer);
       emotionTimer = setTimeout(function() {
         currentEmotion = 'idle';
@@ -658,6 +661,8 @@
       contextMenu.classList.add('show');
     });
     document.addEventListener('click', function() { contextMenu.classList.remove('show'); });
+    // 屏蔽 frameless 窗口里的浏览器默认右键菜单（头像区已有自定义菜单）
+    document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
     contextMenu.addEventListener('click', function(e) {
       var a = e.target.getAttribute('data-action');
       if (a === 'exit') {
