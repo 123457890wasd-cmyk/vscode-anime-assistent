@@ -47,6 +47,12 @@ let standaloneHealthy = false;
 let lastHealthCheckAt = 0;
 const HEALTH_CHECK_INTERVAL_MS = 15000;
 
+/** 状态栏按钮单例：常驻显示桌宠状态，点击拉起 standalone.py */
+let petStatusBar: vscode.StatusBarItem | undefined;
+
+/** 状态栏轮询间隔（刷新「运行中/未运行」标签） */
+const STATUS_POLL_INTERVAL_MS = 10000;
+
 // ============================================================================
 // activate()
 // ============================================================================
@@ -75,7 +81,18 @@ export function activate(context: vscode.ExtensionContext) {
 	// Webview 诊断面板改为按需打开：命令 "Open Anime Assistant"
 	if (collectErrors().length > 0) { handleDiagnosticsChanged(); }
 
-	vscode.window.showInformationMessage('Airi Monitor 已就绪 — 诊断消息将转发到桌宠');
+	// --- 状态栏按钮：常驻显示桌宠状态，点击拉起 standalone.py ---
+	petStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+	petStatusBar.command = 'vscode-anime-assistent.launchPet';
+	petStatusBar.show();
+	context.subscriptions.push(petStatusBar);
+	void refreshPetStatus();
+	const statusTimer = setInterval(() => { void refreshPetStatus(); }, STATUS_POLL_INTERVAL_MS);
+	context.subscriptions.push(new vscode.Disposable(() => clearInterval(statusTimer)));
+
+	vscode.window.showInformationMessage('Airi Monitor 已就绪 — 诊断消息将转发到桌宠', '启动桌宠').then((selection) => {
+		if (selection === '启动桌宠') { void vscode.commands.executeCommand('vscode-anime-assistent.launchPet'); }
+	});
 	console.log(`[airi-monitor] Ready. Push target: http://127.0.0.1:${STANDALONE_PORT}/push`);
 }
 
@@ -210,6 +227,22 @@ async function checkStandaloneAlive(): Promise<boolean> {
 }
 
 // ============================================================================
+// refreshPetStatus() — 刷新状态栏按钮文本（强制重新探测，绕过缓存）
+// ============================================================================
+
+async function refreshPetStatus(): Promise<void> {
+	if (!petStatusBar) { return; }
+	lastHealthCheckAt = 0; // 强制重新探测，否则轮询永远命中 15s 缓存
+	const alive = await checkStandaloneAlive();
+	petStatusBar.text = alive
+		? '$(heart) Airi 桌宠: 运行中'
+		: '$(rocket) Airi 桌宠: 未运行';
+	petStatusBar.tooltip = alive
+		? `Airi 桌宠服务器运行中 (port ${STANDALONE_PORT})，点击可查看启动状态`
+		: `点击启动 Airi 桌宠 (desktop_pet/standalone.py, port ${STANDALONE_PORT})`;
+}
+
+// ============================================================================
 // launchStandalonePet() — 从 VS Code 内一键启动桌宠 (standalone.py)
 // ============================================================================
 
@@ -264,6 +297,7 @@ async function launchStandalonePet(): Promise<void> {
 		if (await checkStandaloneAlive()) {
 			lastHealthCheckAt = Date.now();
 			vscode.window.showInformationMessage('Airi 桌宠已启动，开始监视你的代码 (￣▽￣)');
+			void refreshPetStatus();
 			return;
 		}
 	}
@@ -271,6 +305,7 @@ async function launchStandalonePet(): Promise<void> {
 		`桌宠进程已启动但服务器未响应 (port ${STANDALONE_PORT})。` +
 		'请检查 Python 环境是否安装了 pywebview (pip install pywebview)。'
 	);
+	void refreshPetStatus();
 }
 
 // ============================================================================
