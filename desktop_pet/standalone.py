@@ -18,7 +18,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
 from common import (get_screen_size, WindowAPI, find_character_image,
-                    load_html, start_asset_server, disable_window_backdrop)
+                    load_html, start_asset_server, disable_window_backdrop,
+                    fix_window_background, win_bg_mode)
 import live2d_assets
 
 # 导入 Python 后端（回复生成器）
@@ -379,10 +380,16 @@ def main():
     else:
         push_message('chatMessage', '哼，我上线了。有错误我会骂你的，给我认真写！', 'greeting')
     def _after_window_ready():
-        """窗口真正建出来之后才能做的第一件事：关掉 DWM 的 Mica 背景。
+        """窗口真正建出来之后才能做的两件事。
+
+        1. 关掉 DWM 的 Mica 背景 —— 不关的话整窗是一块实心色（第三轮）
+        2. 压掉/挖掉**宿主 Form 的浅灰底** —— 默认是 WinForms 的
+           SystemColors.Control(#F0F0F0)，pywebview 走 transparent 分支时
+           忘了给它赋值。它会从窗口 region 的 pad 环里露出来，就是用户报的
+           "气泡/名牌周围的块状白"（第五轮）。见 common.fix_window_background()
 
         Form 是 webview.start() 内部才创建的，所以这里轮询等它出现（最多 20s）。
-        关不掉只是"窗口不好看"，不是坏掉 —— 超时只告警、不抛异常。
+        这两样都只影响"窗口好不好看"，不是"能不能用" —— 超时只告警、不抛异常。
         """
         deadline = time.time() + 20
         detail = ''
@@ -390,9 +397,20 @@ def main():
             ok, detail = disable_window_backdrop(window)
             if ok:
                 log(f'[airi-dwm] Mica backdrop disabled ({detail})')
+                break
+            time.sleep(0.25)
+        else:
+            log(f'[airi-dwm] WARNING: 没能关掉 Mica backdrop（{detail}）')
+
+        bg_deadline = time.time() + 10
+        while time.time() < bg_deadline:
+            ok, detail = fix_window_background(window)
+            if ok:
+                log(f'[airi-winbg] Form 底色处理完毕 [{win_bg_mode()}] {detail}')
                 return
             time.sleep(0.25)
-        log(f'[airi-dwm] WARNING: 没能关掉 Mica backdrop（{detail}）')
+        log(f'[airi-winbg] WARNING: 没能处理 Form 底色（{detail}）—— '
+            '气泡/名牌周围可能还会有一圈浅色方块')
 
     log('[airi-standalone] Desktop pet starting...')
     try:

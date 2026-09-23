@@ -17,7 +17,7 @@ import sys
 import argparse
 
 from common import (get_screen_size, WindowAPI, load_html, start_asset_server,
-                    disable_window_backdrop)
+                    disable_window_backdrop, fix_window_background, win_bg_mode)
 import live2d_assets
 
 
@@ -80,16 +80,30 @@ def main():
     api.set_window(window)
 
     def _after_window_ready():
-        """窗口建出来后关掉 DWM 的 Mica 背景（不关的话是整块实心色）。"""
+        """窗口建出来后：关 Mica 背景 + 处理宿主 Form 的浅灰底。
+
+        后者不处理的话，窗口 region 的 pad 环里会露出一圈 #F0F0F0 —— 就是
+        气泡/名牌周围那几块"白色方块"。见 common.fix_window_background()。
+        """
         import time
         deadline = time.time() + 20
         while time.time() < deadline:
             ok, detail = disable_window_backdrop(window)
             if ok:
                 print(f'[airi-dwm] Mica backdrop disabled ({detail})')
+                break
+            time.sleep(0.25)
+        else:
+            print('[airi-dwm] WARNING: 没能关掉 Mica backdrop')
+
+        bg_deadline = time.time() + 10
+        while time.time() < bg_deadline:
+            ok, detail = fix_window_background(window)
+            if ok:
+                print(f'[airi-winbg] Form 底色处理完毕 [{win_bg_mode()}] {detail}')
                 return
             time.sleep(0.25)
-        print('[airi-dwm] WARNING: 没能关掉 Mica backdrop')
+        print(f'[airi-winbg] WARNING: 没能处理 Form 底色（{detail}）')
 
     webview.start(_after_window_ready, debug=False)
 
