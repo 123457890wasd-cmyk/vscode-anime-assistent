@@ -1,0 +1,33 @@
+==========================================================================
+活窗口透明机制实测（测完会还原）
+pid=44164
+==========================================================================
+该 pid 下顶层窗口 6 个：
+  hwnd=0x000E0862 284x441 at (2072,362) WindowsForms10.Window.8.app.0.aec740_r21_ad1
+  hwnd=0x00200CBA 1x1 at (0,0) GDI+ Hook Window Class
+  hwnd=0x00110D80 0x0 at (0,0) .NET-BroadcastEventWindow.4.0.0.0.aec740.0
+  hwnd=0x006E0D3E 0x0 at (0,0) MSCTFIME UI
+  hwnd=0x000C0C0A 0x0 at (0,0) IME
+  hwnd=0x00080C18 0x0 at (0,0) IME
+target=0x000E0862  284x441 at (2072,362)  exstyle=0x00050008
+原 region = COMPLEXREGION
+
+桌面参考(窗口隐藏) 主色: #17181A 80.4%  #036054 4.9%  #DCDEE0 0.1%  #E7E9EB 0.1%  #010101 0.1%  #036052 0.1%
+[baseline  ] 主色: #202020 90.6%  #FFFFFF 1.0%  #F0F0F0 0.5%  #505279 0.4%  #546497 0.3%  #546598 0.2%
+[baseline  ] 与桌面一致 = 0.00%  <- 现在几乎全不透明
+
+--- R1: region=左上 1/4 + SWP_FRAMECHANGED ---
+  SetWindowRgn=1
+  主色: #202020 90.5%  #FFFFFF 1.0%  #F0F0F0 0.7%  #546497 0.3%  #505279 0.3%  #546598 0.2%
+  与桌面一致 = 0.00%
+
+--- L1: WS_EX_LAYERED + LWA_COLORKEY(#202020) ---
+  SetLayeredWindowAttributes=1
+  主色: #202020 90.6%  #FFFFFF 1.0%  #F0F0F0 0.6%  #505279 0.4%  #546497 0.4%  #546598 0.2%
+  与桌面一致 = 0.00%  <- 越高越透明
+
+--- 还原之后 ---
+  exstyle=0x00050008  (原 0x00050008)  region=COMPLEXREGION
+  主色: #202020 90.6%  #FFFFFF 1.0%  #F0F0F0 0.6%  #505279 0.4%  #546497 0.3%  #546598 0.2%
+
+  PNG: fix2_baseline / fix2_region / fix2_layered / fix2_restored

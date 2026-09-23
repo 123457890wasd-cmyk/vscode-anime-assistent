@@ -1,0 +1,7 @@
+==========================================================================
+pywebview 内部结构对照
+==========================================================================
+python     : C:\Program Files\Python310\python.exe
+version    : 3.10.11
+frozen/dpi : n/a
+import webview FAILED : ModuleNotFoundError("No module named 'webview'")

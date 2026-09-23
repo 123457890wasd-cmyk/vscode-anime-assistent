@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Live2D pipeline probe</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  #stage { position: absolute; inset: 0; }
+  #stage canvas { display: block; }
+  #log {
+    position: absolute; left: 0; bottom: 0; right: 0; max-height: 45%;
+    overflow: auto; margin: 0; padding: 6px 8px;
+    font: 11px/1.5 Consolas, monospace; color: #0f0;
+    background: rgba(0,0,0,0.72); white-space: pre-wrap; z-index: 10;
+  }
+  #log.err { color: #f66; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<pre id="log"></pre>
+<script>
+(function () {
+  "use strict";
+
+  var MODEL_URL  = "/model/ds-whale-girl/c_0120.model3.json";
+  var CORE_URL   = "/vendor/live2dcubismcore.min.js";
+  var VENDOR_URL = "/vendor/live2d-vendor.js";
+
+  var report = {
+    ok: false, stage: "boot", t0: Date.now(), steps: [], errors: [],
+    gl: null, vendorKeys: null, model: null, motions: null, expressions: null,
+    paint: null, motionAnim: null, exprToggle: null, exprRestore: null
+  };
+
+  var logEl = document.getElementById("log");
+  function log(msg) {
+    report.steps.push(msg);
+    logEl.textContent += msg + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function fail(where, e) {
+    var m = String((e && e.stack) || (e && e.message) || e);
+    report.stage = where;
+    report.errors.push(where + ": " + m);
+    logEl.classList.add("err");
+    log("!! " + where + " -> " + m);
+  }
+  window.__probe = report;
+  function ms() { return Date.now() - report.t0; }
+
+  function injectScript(src) {
+    return new Promise(function (resolve, reject) {
+      var tag = document.createElement("script");
+      tag.src = src; tag.async = false;
+      tag.onload = function () { resolve(); };
+      tag.onerror = function () { reject(new Error("script failed: " + src)); };
+      document.head.appendChild(tag);
+    });
+  }
+  function sleep(v) { return new Promise(function (r) { setTimeout(r, v); }); }
+
+  // ?clean=1 hides the on-screen log so the window is a fair visual sample
+  var CLEAN = /(^|[?&])clean=1(&|$)/.test(location.search);
+  if (CLEAN) logEl.style.display = "none";
+
+  // ---------------------------------------------------------------------
+  // Frame measurement.
+  // NOTE: the alpha channel must be read from a canvas that was NOT
+  // pre-filled — compositing onto a background first makes every pixel
+  // opaque and turns the "did it paint?" assertion into a tautology.
+  // The visible screenshot is built on a separate canvas.
+  // ---------------------------------------------------------------------
+  var W = 0, H = 0;
+
+  function frameStats(app) {
+    var c = app.canvas;
+
+    var raw = document.createElement("canvas");
+    raw.width = c.width; raw.height = c.height;
+    var rctx = raw.getContext("2d");
+    rctx.clearRect(0, 0, raw.width, raw.height);
+    rctx.drawImage(c, 0, 0);
+    var d = rctx.getImageData(0, 0, raw.width, raw.height).data;
+
+    var opaque = 0, semi = 0, hash = 0x811c9dc5;
+    for (var i = 0; i < d.length; i += 4) {
+      var a = d[i + 3];
+      if (a > 200) opaque++; else if (a > 8) semi++;
+      hash ^= (d[i] + d[i + 1] * 3 + d[i + 2] * 7 + a * 11);
+      hash = (hash * 16777619) >>> 0;
+    }
+    var total = raw.width * raw.height;
+
+    var vis = document.createElement("canvas");
+    vis.width = c.width; vis.height = c.height;
+    var vctx = vis.getContext("2d");
+    vctx.fillStyle = "#9aa0a6";
+    vctx.fillRect(0, 0, vis.width, vis.height);
+    vctx.drawImage(c, 0, 0);
+
+    return {
+      opaque: opaque, semi: semi, total: total,
+      ratio: +(opaque / total).toFixed(4),
+      hash: hash, data: d, shot: vis.toDataURL("image/png")
+    };
+  }
+
+  function diff(a, b) {
+    var n = 0, len = Math.min(a.length, b.length);
+    for (var i = 0; i < len; i += 4) {
+      if (a[i] !== b[i] || a[i + 1] !== b[i + 1] ||
+          a[i + 2] !== b[i + 2] || a[i + 3] !== b[i + 3]) n++;
+    }
+    return n;
+  }
+
+  // deterministic frame stepping: autoUpdate stays OFF and we drive it,
+  // so a comparison never races the shared ticker
+  function step(model, app, frames, dtMs) {
+    for (var i = 0; i < frames; i++) model.update(dtMs);
+    app.render();
+  }
+
+  async function main() {
+    var app = null, model = null, vendor = null;
+
+    try {
+      report.stage = "env";
+      log("url=" + location.href);
+      log("dpr=" + window.devicePixelRatio + " vp=" + window.innerWidth + "x" + window.innerHeight);
+      log("ua=" + navigator.userAgent.slice(0, 88));
+
+      report.stage = "core";
+      await injectScript(CORE_URL);
+      var coreOk = (window.Live2DCubismCore !== undefined);
+      log("[" + ms() + "ms] core loaded=" + coreOk);
+      if (!coreOk) throw new Error("Live2DCubismCore global missing");
+
+      report.stage = "vendor";
+      await injectScript(VENDOR_URL);
+      vendor = window.__dshLive2dPetVendor;
+      if (vendor === undefined) throw new Error("__dshLive2dPetVendor global missing");
+      report.vendorKeys = Object.keys(vendor);
+      log("[" + ms() + "ms] vendor keys=" + report.vendorKeys.join(","));
+      vendor.extensions.add(vendor.Live2DPlugin);
+      vendor.configureCubismSDK({ memorySizeMB: 64 });
+
+      report.stage = "app";
+      var stage = document.getElementById("stage");
+      var rect = stage.getBoundingClientRect();
+      W = Math.max(1, Math.round(rect.width));
+      H = Math.max(1, Math.round(rect.height));
+
+      app = new vendor.Application();
+      await app.init({
+        width: W, height: H,
+        backgroundAlpha: 0,
+        antialias: true,
+        autoDensity: false,
+        resolution: Math.max(2, window.devicePixelRatio),
+        preference: "webgl",
+        preserveDrawingBuffer: true
+      });
+
+      var gl = app.renderer.gl;
+      var dbg = gl.getExtension("WEBGL_debug_renderer_info");
+      report.gl = {
+        version: gl.getParameter(gl.VERSION),
+        vendor: dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : "n/a",
+        renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "n/a",
+        maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+        contextLost: gl.isContextLost()
+      };
+      log("[" + ms() + "ms] app " + W + "x" + H + " res=" + app.renderer.resolution
+          + " backing=" + app.canvas.width + "x" + app.canvas.height);
+      log("[" + ms() + "ms] GL=" + report.gl.version + " lost=" + report.gl.contextLost);
+      log("[" + ms() + "ms] GLrenderer=" + report.gl.renderer);
+
+      app.canvas.style.width = "100%";
+      app.canvas.style.height = "100%";
+      stage.appendChild(app.canvas);
+
+      report.stage = "model";
+      model = await vendor.Live2DModel.from(MODEL_URL, {
+        autoUpdate: false, autoHitTest: true, autoFocus: false,
+        eyeBlink: false, textureOptions: { lod: "full" }
+      });
+      var intr = model.internalModel;
+      var srcW = Math.max(1, (intr && intr.originalWidth) || model.width);
+      var srcH = Math.max(1, (intr && intr.originalHeight) || model.height);
+      report.model = {
+        intrinsicWidth: srcW, intrinsicHeight: srcH,
+        textures: (model.textures || []).length
+      };
+      log("[" + ms() + "ms] model loaded intrinsic=" + srcW + "x" + srcH
+          + " textures=" + report.model.textures);
+
+      app.stage.addChild(model);
+      model.anchor.set(0.5, 0.5);
+      var fit = Math.min(W / srcW, H / srcH) * 0.94;
+      model.scale.set(fit);
+      model.position.set(W / 2, H / 2);
+      report.model.fitScale = +fit.toFixed(5);
+      log("[" + ms() + "ms] layout fit=" + fit.toFixed(5));
+
+      report.stage = "inventory";
+      var mm = intr.motionManager;
+      var groups = Object.keys((mm && mm.definitions) || {});
+      var motionInfo = {};
+      groups.forEach(function (g) {
+        motionInfo[g] = (mm.definitions[g] || []).map(function (d) {
+          return { file: d.File, duration: d.Duration, loop: d.Loop };
+        });
+      });
+      report.motions = motionInfo;
+      log("[" + ms() + "ms] motion groups (" + groups.length + "): " + groups.join(","));
+
+      var exps = ((mm && mm.expressionManager && mm.expressionManager.definitions) || [])
+        .map(function (d) { return d.Name; });
+      report.expressions = exps;
+      log("[" + ms() + "ms] expressions (" + exps.length + ")");
+
+      // ---- A. idle motion must drive parameters -------------------------
+      report.stage = "motion-anim";
+      var okIdle = await model.motion("Idle", 0, vendor.MotionPriority.IDLE);
+      log("[" + ms() + "ms] Idle started=" + okIdle);
+      step(model, app, 6, 16.6);
+      var a0 = frameStats(app);
+      step(model, app, 30, 16.6);          // ~0.5s of animation
+      var a1 = frameStats(app);
+      var movedPx = diff(a0.data, a1.data);
+      report.motionAnim = {
+        started: !!okIdle, changedPixels: movedPx,
+        ratio: +(movedPx / a0.total).toFixed(4), hashBefore: a0.hash, hashAfter: a1.hash
+      };
+      log("[" + ms() + "ms] idle animated: " + movedPx + " px changed ("
+          + (report.motionAnim.ratio * 100).toFixed(2) + "%)");
+      if (movedPx === 0) throw new Error("idle motion advanced but nothing changed on canvas");
+
+      // ---- B. static paint check ----------------------------------------
+      report.stage = "paint";
+      mm.stopAllMotions();
+      step(model, app, 2, 16.6);
+      var paint = frameStats(app);
+      report.paint = {
+        opaque: paint.opaque, semi: paint.semi, total: paint.total, ratio: paint.ratio
+      };
+      log("[" + ms() + "ms] static frame: opaque=" + paint.opaque + " semi=" + paint.semi
+          + " / " + paint.total + " (" + (paint.ratio * 100).toFixed(2) + "%)");
+      if (paint.ratio < 0.05) {
+        throw new Error("canvas essentially empty (ratio=" + paint.ratio + ")");
+      }
+      report.finalShot = paint.shot;
+
+      // ---- C. expression round-trip on a frozen pose ---------------------
+      // This model carries physics (hair, whale tail). Physics keeps being
+      // simulated every update, so "the picture moved" is NOT by itself
+      // evidence that an expression failed to clear. A control window that
+      // advances the same amount of simulated time with nothing changed
+      // gives the physical drift floor to compare against; without it the
+      // assertion would be comparing against zero and always misreport.
+      report.stage = "expression";
+      var WINDOW = 48, STEP_MS = 50;
+      mm.stopAllMotions();
+      step(model, app, 2, 16.6);
+      var s0 = frameStats(app);
+
+      step(model, app, WINDOW, STEP_MS);
+      var s1 = frameStats(app);
+      var driftFloor = diff(s0.data, s1.data);
+
+      var target = exps.indexOf("生气") >= 0 ? "生气" : exps[0];
+      if (target) {
+        await model.expression(target);
+        step(model, app, WINDOW, STEP_MS);
+        var s2 = frameStats(app);
+        var changed = diff(s1.data, s2.data);
+
+        var em2 = intr.motionManager.expressionManager;
+        var hadReset = !!(em2 && typeof em2.resetExpression === "function");
+        if (hadReset) em2.resetExpression();
+        else await model.expression();
+        step(model, app, WINDOW, STEP_MS);
+        var s3 = frameStats(app);
+        var residual = diff(s1.data, s3.data);
+
+        report.driftFloor = {
+          windowFrames: WINDOW, changedPixels: driftFloor,
+          ratio: +(driftFloor / s1.total).toFixed(4)
+        };
+        report.exprToggle = {
+          name: target, changedPixels: changed,
+          ratio: +(changed / s1.total).toFixed(4)
+        };
+        report.exprRestore = {
+          hadResetApi: hadReset, residualPixels: residual,
+          ratio: +(residual / s1.total).toFixed(4),
+          tolerance: +(driftFloor * 3).toFixed(0)
+        };
+
+        log("[" + ms() + "ms] drift floor (" + WINDOW + " frames, no change): "
+            + driftFloor + " px");
+        log("[" + ms() + "ms] expression '" + target + "' -> " + changed + " px changed "
+            + "(" + (changed / s1.total * 100).toFixed(2) + "%)");
+        log("[" + ms() + "ms] after reset (resetExpression=" + hadReset + ") residual "
+            + residual + " px; tolerance " + (driftFloor * 3));
+        if (changed === 0) throw new Error("expression applied but pixels identical");
+      }
+
+      // ---- D. non-idle motion round-trip ---------------------------------
+      report.stage = "motion-switch";
+      var nonIdle = groups.filter(function (g) { return g !== "Idle"; });
+      var ref = frameStats(app);
+      if (nonIdle.length) {
+        mm.stopAllMotions();
+        var g = nonIdle[0];
+        var ok2 = await model.motion(g, 0, vendor.MotionPriority.FORCE);
+        step(model, app, 12, 16.6);
+        var afterSw = frameStats(app);
+        var sw = { group: g, started: !!ok2, changedPixels: diff(ref.data, afterSw.data) };
+        report.motionSwitch = sw;
+        log("[" + ms() + "ms] motion '" + g + "' started=" + !!ok2
+            + " changed=" + sw.changedPixels + " px");
+      }
+
+      // ---- final pretty shot: back to idle, animation running ------------
+      mm.stopAllMotions();
+      await model.motion("Idle", 0, vendor.MotionPriority.FORCE);
+      step(model, app, 20, 16.6);
+      var final = frameStats(app);
+      report.finalShot = final.shot;
+
+      report.ok = true;
+      report.stage = "done";
+      log("[" + ms() + "ms] PROBE OK");
+
+      // ---- showcase: 让角色留在屏幕上，供人眼确认（?showcase=1）-----------
+      // 探针本身 1 秒内就跑完，如果不留住窗口，人根本来不及看。
+      // 这里把日志藏掉并接管 ticker，让 idle 动作持续播放。
+      if (/(^|[?&])showcase=1(&|$)/.test(location.search)) {
+        logEl.style.display = "none";
+        document.body.style.background = "transparent";
+        var prev = performance.now();
+        (function spin(now) {
+          var dt = Math.min(50, now - prev);
+          prev = now;
+          try { model.update(dt); app.render(); } catch (e) { /* 渲染失败就停在这 */ }
+          requestAnimationFrame(spin);
+        })(prev);
+      }
+
+    } catch (e) {
+      fail(report.stage, e);
+      try { if (model && app) { step(model, app, 1, 16.6); report.finalShot = frameStats(app).shot; } }
+      catch (e2) { /* ignore */ }
+    } finally {
+      report.elapsedMs = ms();
+      try {
+        var body = JSON.stringify(report);
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/report", true);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(body);
+      } catch (e) { /* nothing left to do */ }
+    }
+  }
+
+  window.addEventListener("error", function (ev) { fail("window.onerror", ev.message); });
+  main();
+})();
+</script>
+</body>
+</html>

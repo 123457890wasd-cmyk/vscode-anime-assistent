@@ -1,0 +1,65 @@
+==========================================================================
+检查**正在运行**的桌宠窗口（pid=44164）—— 不重启、不打扰
+==========================================================================
+pid 44164 顶层窗口数 = 6
+
+top#0   hwnd=0x000e0862 visible=True class=WindowsForms10.Window.8.app.0.aec740_r21_ad1
+        window=(2072,362)-(2356,803) 284x441
+        client=284x441  exstyle=0x00050008  layered=False
+        region : COMPLEXREGION  bbox=(84,206)-(222,426) 138x220
+        >>> 形状确实小于客户区（真裁了）
+        kid#0 hwnd=0x003102f6 class=WindowsForms10.Window.8.app.0.aec740_r21_ad1 284x441
+        kid#1 hwnd=0x000c1022 class=Chrome_WidgetWin_0 284x441
+        kid#2 hwnd=0x00160574 class=Chrome_WidgetWin_1 284x441
+        kid#3 hwnd=0x00260ca0 class=Chrome_RenderWidgetHostHWND 284x441
+        kid#4 hwnd=0x004310dc class=Intermediate D3D Window 284x441
+
+top#1   hwnd=0x00200cba visible=False class=GDI+ Hook Window Class
+        window=(0,0)-(1,1) 1x1
+        client=1x1  exstyle=0x00000000  layered=False
+        region : ERROR/NO-REGION
+        >>> 窗口**根本没有 region** == SetWindowRgn 从未成功过
+
+top#2   hwnd=0x00110d80 visible=False class=.NET-BroadcastEventWindow.4.0.0.0.aec740.0
+        window=(0,0)-(0,0) 0x0
+        client=0x0  exstyle=0x00000000  layered=False
+        region : ERROR/NO-REGION
+        >>> 窗口**根本没有 region** == SetWindowRgn 从未成功过
+
+top#3   hwnd=0x006e0d3e visible=False class=MSCTFIME UI
+        window=(0,0)-(0,0) 0x0
+        client=0x0  exstyle=0x00000008  layered=False
+        region : ERROR/NO-REGION
+        >>> 窗口**根本没有 region** == SetWindowRgn 从未成功过
+
+top#4   hwnd=0x000c0c0a visible=False class=IME
+        window=(0,0)-(0,0) 0x0
+        client=0x0  exstyle=0x00000008  layered=False
+        region : ERROR/NO-REGION
+        >>> 窗口**根本没有 region** == SetWindowRgn 从未成功过
+
+top#5   hwnd=0x00080c18 visible=False class=IME
+        window=(0,0)-(0,0) 0x0
+        client=0x0  exstyle=0x00000000  layered=False
+        region : ERROR/NO-REGION
+        >>> 窗口**根本没有 region** == SetWindowRgn 从未成功过
+
+--- PrintWindow 抓取活窗口的真实渲染内容 ---
+  top : printwindow=1 284x441  top: #202020/A255=113400, #FFFFFF/A255=1292, #505279/A255=462, #546497/A255=438
+
+--- 逐个抓子窗口（找"谁在铺底"）---
+  kid#0 WindowsForms10.Window.8.app.0.aec740_r21_ad1  region=ERROR/NO-REGION
+       printwindow=1 284x441  top: #202020/A255=113400, #FFFFFF/A255=1302, #505279/A255=443, #546497/A255=438
+       png=live_kid0.png
+  kid#1 Chrome_WidgetWin_0  region=ERROR/NO-REGION
+       printwindow=1 284x441  top: #202020/A255=113400, #FFFFFF/A255=1324, #505279/A255=436, #546497/A255=433
+       png=live_kid1.png
+  kid#2 Chrome_WidgetWin_1  region=ERROR/NO-REGION
+       printwindow=1 284x441  top: #202020/A255=113400, #FFFFFF/A255=1313, #546497/A255=437, #505279/A255=435
+       png=live_kid2.png
+  kid#3 Chrome_RenderWidgetHostHWND  region=ERROR/NO-REGION
+       printwindow=1 284x441  top: #202020/A255=113491, #FFFFFF/A255=1316, #505279/A255=527, #546497/A255=436
+       png=live_kid3.png
+  kid#4 Intermediate D3D Window  region=ERROR/NO-REGION
+       printwindow=1 284x441  top: #000000/A255=113753, #FFFFFF/A255=1325, #505279/A255=528, #546497/A255=443
+       png=live_kid4.png

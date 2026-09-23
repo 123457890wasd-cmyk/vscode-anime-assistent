@@ -1,0 +1,32 @@
+==========================================================================
+窗口形状/分层改动到底有没有生效？
+pid=44164
+==========================================================================
+屏幕: primary=2560x1440 virtual=(0,0) 4267x1440
+target=0x000E0862  284x441 at (2072,362)  dpi=96  exstyle=0x00050008
+  DwmGetWindowAttribute(cloaked) rc=0 val=0
+  DwmGetWindowAttribute(backdrop) rc=0 val=2
+  DwmGetWindowAttribute(ext_frame) rc=-2147024774 val=-1
+
+--- 逐点 WindowFromPoint（谁在最上面） ---
+  (2092,382) -> hwnd=0x00020A86 class=Chrome_RenderWidgetHostHWND  root=0x000504F8 OTHER
+  (2212,582) -> hwnd=0x00260CA0 class=Chrome_RenderWidgetHostHWND  root=0x000E0862 same
+  (2212,752) -> hwnd=0x00260CA0 class=Chrome_RenderWidgetHostHWND  root=0x000E0862 same
+
+--- 子窗口及其 region ---
+  kid#0 0x003102F6 WindowsForms10.Window.8.app.0.aec740_r21_ad1 ex=0x00000020 region=COMPLEXREGION bbox=(84,207)-(223,426)
+  kid#1 0x000C1022 Chrome_WidgetWin_0                           ex=0x00000000 region=COMPLEXREGION bbox=(84,207)-(223,426)
+  kid#2 0x00160574 Chrome_WidgetWin_1                           ex=0x00200000 region=COMPLEXREGION bbox=(84,207)-(223,426)
+  kid#3 0x00260CA0 Chrome_RenderWidgetHostHWND                  ex=0x00000020 region=COMPLEXREGION bbox=(84,207)-(223,426)
+  kid#4 0x004310DC Intermediate D3D Window                      ex=0x00280024 region=COMPLEXREGION bbox=(84,207)-(223,426)
+
+[baseline] #202020 90.6%  #FFFFFF 1.0%  #F0F0F0 0.6%  #505279 0.4%  与桌面一致=0.00%
+
+=== 判别实验 ===
+[L0 layered+alpha] #17181A 80.4%  #036054 4.9%  #DCDEE0 0.1%  #E7E9EB 0.1%  与桌面一致=100.00%  (layered key=0x000000 a=0 f=2)
+[L1 key=#FFFFFF ] #202020 90.5%  #FFFFFF 1.0%  #F0F0F0 0.7%  #546497 0.3%  与桌面一致=0.00%  (layered key=0xFFFFFF a=0 f=1)
+[L2 key=#202020 ] #202020 90.6%  #FFFFFF 1.0%  #F0F0F0 0.7%  #546497 0.3%  与桌面一致=0.00%  (layered key=0x202020 a=0 f=1)
+[L3 layered+alpha255] #202020 90.6%  #FFFFFF 1.0%  #F0F0F0 0.5%  #505279 0.4%  与桌面一致=0.00%  (layered key=0x202020 a=255 f=2)
+[restored] #202020 90.6%  #FFFFFF 1.0%  #F0F0F0 0.7%  #546497 0.3%  与桌面一致=0.00%  exstyle=0x00050008
+
+读法：L0 若「与桌面一致」跳到 ~100%% ⇒ 分层生效；仍为 0%% ⇒ 分层对这个窗口无效。

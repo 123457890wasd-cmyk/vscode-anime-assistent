@@ -1,0 +1,56 @@
+MIT License
+
+Copyright (c) 2026 A8Chann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+Third-party components bundled into lib/live2d-vendor.js:
+
+  pixi.js                       MIT
+  untitled-pixi-live2d-engine   MIT
+
+The DS鲸鱼娘 model bundled in ./pets/ds-whale-girl (and its source pack in
+../model-packs) is NOT covered by the MIT license above, and must not be used
+as if it were. It is licensed CC BY-NC-SA 4.0:
+
+    attribution required - NON-COMMERCIAL only - share-alike
+    https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh
+
+Rights holders, in the chain the character passed through:
+
+    上善无形     original character, the OC 溟月
+                 https://www.pixiv.net/users/62155430
+    ZipZipPipe   the DeepSeek maid redesign
+                 https://www.pixiv.net/users/18604994
+    氵六青       this Live2D model (rigging, motions, expressions)
+                 https://space.bilibili.com/11272072
+
+氵六青 authorised redistribution and open-sourcing of this model here. That
+permission does NOT lift the base terms: the character itself was published by
+上善无形 and ZipZipPipe under CC BY-NC-SA 4.0, so the non-commercial and
+share-alike conditions still apply. Commercial use needs permission from EACH
+rights holder, not just one.
+
+Live2D Cubism Core (live2dcubismcore.min.js) is proprietary and is NOT
+included in this repository. It must be obtained from Live2D Inc. and placed
+in the pet runtime directory by the user. See README.
+
+Full attribution: ../NOTICE.md

@@ -1,0 +1,25 @@
+==============================================================================
+真 Chrome A/B：谁在名牌/气泡后面画浅色方块
+==============================================================================
+  model Version=3 closure=57 files, 57 present, 0 missing
+  cubism core 207155 bytes
+  browser: C:\Program Files\Google\Chrome\Application\chrome.exe
+  名牌探测矩形（窗口相对）: (112, 378, 176, 434)
+
+  [0-baseline          ] 原样：预期名牌后面有方块
+      视图 300x480   不透明像素 8969 (6.23%)   名牌矩形内近白占比 0.0%  气泡尺寸 -
+
+  [1-no-name-filter    ] 去掉 .pet-name 的 filter: drop-shadow
+      视图 300x480   不透明像素 8982 (6.24%)   名牌矩形内近白占比 0.0%  气泡尺寸 -
+
+  [2-no-bubble-backdrop] 去掉 .bubble 的 backdrop-filter
+      视图 300x480   不透明像素 8975 (6.23%)   名牌矩形内近白占比 0.0%  气泡尺寸 -
+
+  [3-no-gradclip       ] 名牌不再用 background-clip:text（改纯色字）
+      视图 300x480   不透明像素 9006 (6.25%)   名牌矩形内近白占比 0.0%  气泡尺寸 -
+
+  [4-all-off           ] 1+2 同时关（看是不是要组合）
+      视图 300x480   不透明像素 8982 (6.24%)   名牌矩形内近白占比 0.0%  气泡尺寸 -
+
+拼接图: S:\My event\projects\vscode-anime-assistent\live2d_probe\ui_variants.png  (300, 2420)
+各变体单独图: ui_variant_<n>.png

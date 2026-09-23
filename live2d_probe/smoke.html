@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>trace</title>
+<style>html,body{margin:0;background:#222;color:#0f0;font:12px/1.5 Consolas,monospace}#log{padding:8px;white-space:pre-wrap}</style>
+</head>
+<body>
+<pre id="log"></pre>
+<script>
+// 细粒度追踪：每个危险调用前后各回报一次。
+// 若某步卡死/崩溃，最后收到的那条 "*-start" 就是断点位置。
+var SEQ = 0, T0 = Date.now();
+var logEl = document.getElementById("log");
+
+function mark(step, data) {
+  SEQ += 1;
+  var rec = { seq: SEQ, step: step, t: Date.now() - T0, data: data === undefined ? null : data };
+  logEl.textContent += "\n#" + SEQ + " " + step + " " + JSON.stringify(rec.data || "");
+  try {
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", "/report", true);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.send(JSON.stringify(rec));
+  } catch (e) { logEl.textContent += " (send failed)"; }
+}
+
+mark("script-start", {
+  href: location.href, origin: location.origin,
+  ua: navigator.userAgent, dpr: window.devicePixelRatio,
+  viewport: window.innerWidth + "x" + window.innerHeight,
+  hasOffscreenCanvas: typeof OffscreenCanvas,
+  hasWebGL2Type: typeof WebGL2RenderingContext
+});
+
+window.addEventListener("error", function (ev) { mark("onerror", { message: ev.message }); });
+window.addEventListener("unhandledrejection", function (ev) { mark("unhandled", { reason: String(ev.reason) }); });
+
+function mkCanvas() {
+  var c = document.createElement("canvas");
+  c.width = 64; c.height = 64;
+  document.body.appendChild(c);
+  return c;
+}
+function describe(ctx) {
+  if (!ctx) return { ok: false, reason: "null" };
+  try {
+    var dbg = ctx.getExtension("WEBGL_debug_renderer_info");
+    return {
+      ok: true,
+      version: ctx.getParameter(ctx.VERSION),
+      renderer: dbg ? ctx.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "n/a"
+    };
+  } catch (e) { return { ok: true, describeError: String(e) }; }
+}
+
+// 逐项隔离。注意：每一步都是独立的顶层语句，
+// 这样"下一条 mark 没到"就能唯一确定是哪一次调用出的问题。
+mark("t1-2d-start");
+var ctx2d = mkCanvas().getContext("2d");
+mark("t1-2d-done", { ok: !!ctx2d });
+
+mark("t2-webgl1-start");
+var ctx1 = describe(mkCanvas().getContext("webgl"));
+mark("t2-webgl1-done", ctx1);
+
+mark("t3-experimental-start");
+var ctxE = describe(mkCanvas().getContext("experimental-webgl"));
+mark("t3-experimental-done", ctxE);
+
+mark("t4-webgl2-start");
+var ctx2 = describe(mkCanvas().getContext("webgl2"));
+mark("t4-webgl2-done", ctx2);
+
+mark("t5-draw-start");
+try {
+  var dc = mkCanvas();
+  var dctx = dc.getContext("webgl2") || dc.getContext("webgl");
+  if (dctx) {
+    dctx.clearColor(0, 1, 0, 1);
+    dctx.clear(dctx.COLOR_BUFFER_BIT);
+    var px = new Uint8Array(4);
+    dctx.readPixels(0, 0, 1, 1, dctx.RGBA, dctx.UNSIGNED_BYTE, px);
+    mark("t5-draw-done", { readback: Array.prototype.slice.call(px) });
+  } else {
+    mark("t5-draw-done", { skipped: "no ctx" });
+  }
+} catch (e) { mark("t5-draw-threw", { error: String(e) }); }
+
+// 子资源与脚本注入
+function xhrGet(url) {
+  return new Promise(function (resolve) {
+    var x = new XMLHttpRequest();
+    x.open("GET", url, true); x.timeout = 8000;
+    x.onload = function () { resolve({ url: url, status: x.status, bytes: (x.responseText || "").length }); };
+    x.onerror = function () { resolve({ url: url, error: "onerror" }); };
+    x.ontimeout = function () { resolve({ url: url, error: "timeout" }); };
+    x.send();
+  });
+}
+function inject(src) {
+  return new Promise(function (resolve) {
+    var t = document.createElement("script");
+    t.src = src; t.async = false;
+    var done = false;
+    var timer = setTimeout(function () { if (!done) { done = true; resolve({ src: src, result: "timeout" }); } }, 8000);
+    t.onload = function () { if (!done) { done = true; clearTimeout(timer); resolve({ src: src, result: "loaded" }); } };
+    t.onerror = function () { if (!done) { done = true; clearTimeout(timer); resolve({ src: src, result: "onerror" }); } };
+    document.head.appendChild(t);
+  });
+}
+
+mark("t6-tier-begin");
+(async function () {
+  mark("t6a-xhr-core", await xhrGet("/vendor/live2dcubismcore.min.js"));
+  mark("t6b-inject-core", await inject("/vendor/live2dcubismcore.min.js"));
+  mark("t6c-core-global", { present: window.Live2DCubismCore !== undefined });
+  mark("t6d-inject-vendor", await inject("/vendor/live2d-vendor.js"));
+  var v = window.__dshLive2dPetVendor;
+  mark("t6e-vendor-global", { present: v !== undefined, keys: v ? Object.keys(v) : null });
+
+  // 最小 pixi 应用：这是 Live2D 真正依赖的那一层
+  if (v) {
+    mark("t7-app-init-start");
+    try {
+      var app = new v.Application();
+      var p = app.init({
+        width: 200, height: 200, backgroundAlpha: 0,
+        antialias: true, autoDensity: false, resolution: 2,
+        preference: "webgl", preserveDrawingBuffer: true
+      });
+      if (p && typeof p.then === "function") {
+        await Promise.race([
+          p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error("init timeout 10s")); }, 10000); })
+        ]);
+      }
+      var g = app.renderer.gl;
+      mark("t7-app-init-done", { glVersion: g.getParameter(g.VERSION), canvas: app.canvas.width + "x" + app.canvas.height });
+      document.body.appendChild(app.canvas);
+      app.render();
+      mark("t7-app-rendered", { done: true });
+    } catch (e) {
+      mark("t7-app-threw", { error: String(e) });
+    }
+  }
+  mark("all-done", { ok: true });
+})();
+</script>
+</body>
+</html>

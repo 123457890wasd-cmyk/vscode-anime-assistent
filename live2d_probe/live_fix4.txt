@@ -1,0 +1,17 @@
+==========================================================================
+关掉 Mica 之后 region / 颜色键会不会生效？
+target=0x000E0862 284x441 at (2072,362)
+==========================================================================
+DwmGetWindowAttribute(38 backdrop) 改前: rc=0 val=2
+[baseline   ] #202020 90.6%  #FFFFFF 1.0%  #F0F0F0 0.7%  #546497 0.3%  与桌面一致=0.00%
+原 region = COMPLEXREGION
+DwmSetWindowAttribute(38, NONE=1) -> 0
+[Mica OFF   ] #17181A 70.9%  #036054 4.9%  #FFFFFF 1.0%  #F0F0F0 0.7%  与桌面一致=90.49%
+  (改后 backdrop=1)
+[+region 1/4] #17181A 70.9%  #036054 4.9%  #FFFFFF 1.0%  #F0F0F0 0.6%  与桌面一致=90.53%
+[+region 原形状] #17181A 70.9%  #036054 4.9%  #FFFFFF 1.0%  #F0F0F0 0.8%  与桌面一致=90.53%
+[Mica 还原    ] #202020 90.5%  #FFFFFF 1.0%  #F0F0F0 0.6%  #546497 0.4%  与桌面一致=0.00%
+最终 backdrop=2  region=COMPLEXREGION
+
+判读：若 [Mica OFF] 这一行仍铺满 #202020 ⇒ 底色不是 Mica；
+      若 [+region 1/4] 与桌面一致明显上升 ⇒ 关掉 Mica 后 region 裁剪生效。

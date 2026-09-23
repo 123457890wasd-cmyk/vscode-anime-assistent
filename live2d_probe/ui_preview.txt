@@ -1,0 +1,65 @@
+==============================================================================
+桌宠真页面预览（透明底全页截图 → 深色底合成）
+==============================================================================
+  model Version=3 closure=57 files, 57 present, 0 missing
+  cubism core 207155 bytes
+  browser : C:\Program Files\Google\Chrome\Application\chrome.exe
+  视口    : 284x441（= 用户机器实测 client）
+  等待    : load 事件被 /_slow.png 拖住 13s
+
+=== card=off ===
+  视图 284x441  不透明像素 15889 (12.69%)
+  [t=10s] live2d=True vw=284 vh=441
+        canvas 的 CSS 盒 = [62, 169, 222, 379]
+        底板 shown=False box=[0, 0, 0, 0]
+        气泡 box=[50, 118, 234, 155]
+  [t=12s] live2d=True vw=284 vh=441
+        canvas 的 CSS 盒 = [62, 169, 222, 379]
+        底板 shown=False box=[0, 0, 0, 0]
+        气泡 box=[50, 118, 234, 155]
+
+=== card=tight ===
+  视图 284x441  不透明像素 28636 (22.86%)
+  [t=10s] live2d=True vw=284 vh=441
+        canvas 的 CSS 盒 = [62, 169, 222, 379]
+        底板 shown=True box=[75, 199, 232, 343]
+        气泡 box=[50, 118, 234, 155]
+  [t=12s] live2d=True vw=284 vh=441
+        canvas 的 CSS 盒 = [62, 169, 222, 379]
+        底板 shown=True box=[75, 199, 232, 343]
+        气泡 box=[50, 118, 234, 155]
+
+=== card=all ===
+  视图 284x441  不透明像素 45848 (36.61%)
+  [t=10s] live2d=True vw=284 vh=441
+        canvas 的 CSS 盒 = [62, 169, 222, 379]
+        底板 shown=True box=[71, 195, 236, 437]
+        气泡 box=[50, 118, 234, 155]
+  [t=12s] live2d=True vw=284 vh=441
+        canvas 的 CSS 盒 = [62, 169, 222, 379]
+        底板 shown=True box=[71, 195, 236, 437]
+        气泡 box=[50, 118, 234, 155]
+
+=== card=frame ===
+  视图 284x441  不透明像素 22389 (17.88%)
+  [t=10s] live2d=True vw=284 vh=441
+        canvas 的 CSS 盒 = [62, 169, 222, 379]
+        底板 shown=True box=[75, 199, 232, 343]
+        气泡 box=[50, 118, 234, 155]
+  [t=12s] live2d=True vw=284 vh=441
+        canvas 的 CSS 盒 = [62, 169, 222, 379]
+        底板 shown=True box=[75, 199, 232, 343]
+        气泡 box=[50, 118, 234, 155]
+
+=== card=square ===
+  视图 284x441  不透明像素 36708 (29.31%)
+  [t=10s] live2d=True vw=284 vh=441
+        canvas 的 CSS 盒 = [62, 169, 222, 379]
+        底板 shown=True box=[75, 193, 232, 350]
+        气泡 box=[50, 118, 234, 155]
+  [t=12s] live2d=True vw=284 vh=441
+        canvas 的 CSS 盒 = [62, 169, 222, 379]
+        底板 shown=True box=[75, 193, 232, 350]
+        气泡 box=[50, 118, 234, 155]
+
+拼接图: S:\My event\projects\vscode-anime-assistent\live2d_probe\ui_preview.png  (284, 2235)

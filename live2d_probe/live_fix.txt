@@ -1,0 +1,22 @@
+==========================================================================
+活窗口实验：把 region 复制到子窗口，屏幕方块会消失吗？
+pid=44164  apply=True
+==========================================================================
+GetSysColor(COLOR_BTNFACE) = #F0F0F0
+AppsUseLightTheme = 0  (0=深色)
+窗口 screen rect = (2072,362)-(2356,803) 284x441
+父窗口 region = COMPLEXREGION bbox=(84,207)-(223,426)
+
+--- 屏幕实测 ---
+  [baseline 改之前] BitBlt=1  主色: #202020 90.5%  #FFFFFF 1.1%  #F0F0F0 0.4%  #505279 0.4%  #546497 0.3%
+
+子窗口 5 个
+  kid#0 WindowsForms10.Window.8.app.0.aec740_r21_ad1       原有region=ERROR/NO-REGION SetWindowRgn=1
+  kid#1 Chrome_WidgetWin_0                                 原有region=ERROR/NO-REGION SetWindowRgn=1
+  kid#2 Chrome_WidgetWin_1                                 原有region=ERROR/NO-REGION SetWindowRgn=1
+  kid#3 Chrome_RenderWidgetHostHWND                        原有region=ERROR/NO-REGION SetWindowRgn=1
+  kid#4 Intermediate D3D Window                            原有region=ERROR/NO-REGION SetWindowRgn=1
+  [已给子窗口设 region] BitBlt=1  主色: #202020 90.6%  #FFFFFF 1.0%  #F0F0F0 0.6%  #505279 0.4%  #546497 0.3%
+
+  注：这一步是**临时实验**，脚本不负责还原；
+      如果方块消失了，就把这个做法写进 common.py 固化下来。
