@@ -3,10 +3,10 @@
   "charImgHidden": true,
   "cssHidden": true,
   "canvas": "320x420",
-  "opaque": 39969,
-  "ratio": 0.2974,
+  "opaque": 40008,
+  "ratio": 0.2977,
   "anim": {
-    "changedPixels": 17687,
+    "changedPixels": 18652,
     "sampled": true
   },
   "blink": {
@@ -30,8 +30,8 @@
     "eyeR": 22
   },
   "status": "done",
-  "elapsedMs": 10102,
-  "saveCalls": 1573,
+  "elapsedMs": 10089,
+  "saveCalls": 1571,
   "postMin": 0,
   "postMax": 1,
   "blinkFrames": 37,
