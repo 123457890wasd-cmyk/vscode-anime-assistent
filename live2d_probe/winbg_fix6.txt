@@ -1,0 +1,35 @@
+==============================================================================
+WinForms TransparencyKey 到底设置了什么（隔离实验，无 WebView2 / 无游戏）
+==============================================================================
+hwnd = 0x30DA2
+
+--- 干净 Form（只建了句柄） ---
+0. baseline                        exstyle=0x00010000 LAYERED=False  (not layered / GetLWA failed)
+
+--- 只改 BackColor（不碰 TransparencyKey） ---
+1. BackColor=#010203               exstyle=0x00010000 LAYERED=False  (not layered / GetLWA failed)
+
+--- 再设 TransparencyKey = 同色（第五轮的写法） ---
+2. +TransparencyKey=#010203        exstyle=0x00090000 LAYERED=True  flags=LWA_ALPHA   key=#010203 alpha=0
+
+--- 补一刀 Opacity = 1.0（看能否把 alpha 修回 255） ---
+3. +Opacity=1.0                    exstyle=0x00090000 LAYERED=True  flags=LWA_ALPHA   key=#010203 alpha=0
+
+--- 自己用 ctypes 直接打颜色键（对照组） ---
+SetLayeredWindowAttributes(LWA_COLORKEY, #010203) -> 1
+4. 手动 LWA_COLORKEY                 exstyle=0x00090000 LAYERED=True  flags=LWA_COLORKEY key=#010203 alpha=0
+
+--- 再读一次 Opacity 属性本身 ---
+form.Opacity = 1.0
+form.TransparencyKey = Color [A=255, R=1, G=2, B=3]
+form.BackColor = Color [A=255, R=1, G=2, B=3]
+
+==============================================================================
+判读
+==============================================================================
+★ 第 2 步（设 TransparencyKey）之后 flags 里**只有 LWA_ALPHA**，
+  且 alpha=0 —— 说明 WinForms 把整窗设成了"按 alpha 混合"，
+  颜色键被覆盖。alpha==0 时窗口既看不见又鼠标穿透。
+  → 这就是 key 模式点击/拖拽失效的机制。
+
+对照：第 4 步手动打键之后 flags=2（这一步是"正确状态"的样板）

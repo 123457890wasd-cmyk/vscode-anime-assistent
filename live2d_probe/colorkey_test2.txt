@@ -1,0 +1,14 @@
+hwnd=0x190C74
+baseline exstyle=0x00050000
+added WS_EX_LAYERED via SetWindowLongW
+A: SetLWA(key=#030201,0,LWA_COLORKEY) -> True
+  read[A] ok=True flags=2 key=#000000 alpha=0
+B: 再打一次 -> True
+  read[B] ok=True flags=2 key=#000000 alpha=0
+C: Show 之后打 -> True
+  read[C] ok=True flags=2 key=#000000 alpha=0
+D: windll 打 -> True
+  read[D] ok=True flags=2 key=#000000 alpha=0
+E: key 值 = 197121 (0x030201)
+E: 显式包 DWORD 打 -> True
+  read[E] ok=True flags=2 key=#000000 alpha=0
