@@ -20,8 +20,9 @@
 | 非 idle 动作切换 | ✅ |
 | **pywebview + WebView2** | ✅ **已由用户在自己桌面上确认渲染成功** |
 | **桌宠本体 `ui.html` 端到端** | ✅ 7/7 断言通过（见下） |
-| **窗口真透明（关掉 DWM Mica 背景）** | ✅ 用户真实窗口上**屏幕实测**：0.00% → 90.49% 透出桌面（`live_fix4.txt`） |
-| **窗口形状（`SetWindowRgn`，只管鼠标点穿）** | ✅ 31/31 断言通过，`GetWindowRgn` 读回逐值相同（**画面不受它影响**，见第三轮） |
+| **窗口真透明（关掉 DWM Mica 背景）** | ✅ 用户真实窗口上**屏幕实测**：0.00% → 90.49% 透出桌面（`live_fix4.txt`）。⚠️ **第五轮修正**：那 90% 里**很大一部分其实是 region 裁剪**（窗口被裁成 DOM 形状，形状之外露桌面）。真正让"页面没画的像素"变透明的是第五轮的 `AIRI_WIN_BG` —— `live_fix5.txt`：与桌面一致 **52.41% → 79.28%** |
+| **窗口形状（`SetWindowRgn`）** | ✅ 31/31 断言通过，`GetWindowRgn` 读回逐值相同。⚠️ **第五轮修正**：它**确实会裁画面**（形状之外露桌面），第三轮"画面不受它影响"那句只在"整窗被 Mica 盖住"的前提下成立；它同时负责鼠标点穿 |
+| **块状白（气泡/名牌背后那一圈方底）** | ✅ 第五轮定位到窗口层面并修掉：region 的 pad 环里露的是宿主 Form 默认底色 `#F0F0F0`。真窗口 A/B：名牌区域 `#F0F0F0` 像素 **21.07% → 0.00%**（`live_fix5.txt`、`_cmp5_名牌_off.png` vs `_cmp5_名牌_key.png`） |
 | **点击说话（alpha 命中 + 台词池）** | ✅ 26/26 断言通过（真 Chrome 合成事件，拖拽不误触发） |
 
 Chromium 侧 5/5 断言全通过。WebView2 侧在本自动化会话里曾表现随机
@@ -497,6 +498,137 @@ C=all、D=frame、E=square）。
 
 > ⚠️ 和上一轮那条「WebView2 自动化会话不可靠」是同一类问题：
 > **读不到 ≠ 不存在**。判据必须能区分"东西坏了"和"我这一眼没看准"。
+
+## 第五轮：**块状白的真正根因** = region 的 pad 环露出宿主 Form 的底色（`AIRI_WIN_BG`）
+
+用户第四次反馈："块状白还在，对话框（气泡）也有"。这一轮不再猜机制，改成**量尺寸**，
+一路量到窗口层面，最后用**真 WebView2 窗口 + 屏幕像素**做了 A/B。
+
+### 1) 先量：三块"白"的几何
+
+对用户截图做连通域 + 逐行扫描（`_shot5.py` / `_crop5.py`），把窗口定位到截图内原点
+`(23,22)`（用名牌块反推），得到窗口内坐标：
+
+| 亮块 | 窗口内位置 | 尺寸 | 颜色 | 矩形度 |
+|---|---|---|---|---|
+| 气泡 1 | `(30,70)-(251,115)` | 222×46 | 边上一圈 `rgb(217,212,214)`、靠外 `rgb(236,235,235)` | 0.28（内部被气泡盖住） |
+| 气泡 2 | `(44,116)-(237,159)` | 193×44 | 同上 | — |
+| 名牌 | `(119,386)-(162,425)` | 44×40 | `rgb(241,235,237)` | 0.955 |
+
+放大看（`_crop5_plate.png`）：**Airi 背后一块方底、online 背后一块更宽的方底**，
+两块都是直角矩形，而中间的气泡是圆角的 —— 圆角矩形套一个直角矩形，
+这就是用户说的"对话框那块白"。
+
+### 2) 再算：这三块正好等于「DOM 盒 + pad」
+
+`ui.html collectUiRects()` 把每个 DOM 盒**加 pad** 之后上报给 `SetWindowRgn`：
+
+```js
+for (var i = 0; i < bubbles.length; i++) pairs.push([bubbles[i], 5]);   // 气泡 pad=5
+if (nm) pairs.push([nm, 3]);   if (st) pairs.push([st, 3]);              // 名牌 pad=3
+out.push([r.left - pad, r.top - pad, r.right + pad, r.bottom + pad]);
+```
+
+按 CSS 算出 DOM 盒再加 pad，与截图实测**逐个吻合**：
+
+| 位置 | 算式 | 算出来 | 截图实测 |
+|---|---|---|---|
+| 气泡 | 高 = 8+8(padding) + 18.6(line) + 2(border) = 36.6；宽 212 | +5 → **222×46.6** | **222×46** ✓ |
+| `Airi` | 13px 字 + 3px letter-spacing → 33×15.6 | +3 → **39×21.6** | **40×20** ✓ |
+| `online` | 点 6 + margin 4 + 10px 字 ≈ 37；高 14 | +3 → **43×20** | **44×20** ✓ |
+
+**结论：白块 = 窗口 region 的 pad 环。** region 之外整个窗口被剪掉（漏桌面），
+pad 环在 region 之内、页面又什么都没画 —— 于是露出宿主窗口自己的底色。
+
+### 3) 底色是谁的：pywebview 忘了一行
+
+```python
+# webview/platforms/winforms.py:286-292
+if window.transparent and self.browser:
+    self.SetStyle(WinForms.ControlStyles.SupportsTransparentBackColor, True)
+    self.browser.DefaultBackgroundColor = Color.Transparent
+else:
+    self.BackColor = ColorTranslator.FromHtml(window.background_color)   # ← 只有非透明才赋值
+```
+
+走 `transparent=True` 时 **`Form.BackColor` 从来没被赋值**，保持 WinForms 默认的
+`SystemColors.Control`，浅色主题下就是 **`#F0F0F0`**。
+（WebView2 那层确实是透明的 —— 透明露出来的就是这张浅灰底。）
+
+真窗口实测里这个色**原样出现**：`off` 那次 `top colors` 里赫然是 `#F0F0F0 0.95%`。
+
+### 4) 顺带解释第三轮为什么"LWA_COLORKEY 挖不掉底色"
+
+第三轮用 `SetLayeredWindowAttributes(LWA_COLORKEY, #202020)`：**键色猜错了**。
+底色是 `#F0F0F0`（浅灰），拿 `#202020`（深灰）去挖，一个像素都不会动 ——
+当时的结论被迫写成"只有整窗 LWA_ALPHA 有效"，于是绕道去关 Mica。
+
+本轮又把这个坑原地复现了一次，作为反例留在数据里：
+`probe_live_fix5.py` 的"外部对照"把键色取成画面里最亮的 `#FFFFFF`（而不是实测底色），
+结果 **"与桌面一致" 52.41% → 35.58%（更差）**，还把模型自己的白美术挖出了洞。
+
+> **键色必须等于宿主底色的实测值，不能凭"看起来像"。** 这条比结论本身更值钱。
+
+### 5) 修法
+
+`common.fix_window_background()`：
+
+```python
+form.BackColor     = Color.FromArgb(1, 2, 3)   # 画面上不可能出现的颜色
+form.TransparencyKey = 同一个颜色                # WinForms 据此走 LWA_COLORKEY → 真挖洞
+```
+
+- 页面没画的像素变成**真洞**（桌面透出来），而且那些像素**自动点穿**；
+- 键色选 `#010203` 而不是黑/白：万一某个页面像素恰好等于键色会被误挖，
+  `#010203` 在设计里不可能出现；
+- `AIRI_WIN_BG`：`key`（默认）/ `dark`（只把底色压成近黑、不打洞，退路）/ `off`（A/B 用）；
+- 在 `standalone.py` / `main.py` 的 `_after_window_ready()` 里执行（Form 是
+  `webview.start()` 内部才创建的，所以轮询等它出现，最多 10s；失败只告警）。
+
+### 6) 真窗口 A/B（`probe_live_fix5.py`，读数是屏幕像素）
+
+两个配置各起一次桌宠、屏幕截图、数像素。判据只有一个数：**有多少像素等于 `#F0F0F0`**。
+
+| 指标 | `AIRI_WIN_BG=off`（复现） | `AIRI_WIN_BG=key`（修复） |
+|---|---|---|
+| 名牌区域 `#F0F0F0` | **1475 / 7000（21.07%）** | **0（0.00%）** |
+| 气泡区域 `#F0F0F0` | 133（0.42%） | **0（0.00%）** |
+| 整窗浅灰像素 | 4894（3.91%） | 2081（1.66%） |
+| 出现最多的色 | `#FFFFFF` / **`#F0F0F0` 0.95%** | `#FFFFFF`（`#F0F0F0` 消失） |
+| 与桌面像素一致 | 52.41% | **79.28%** |
+
+放大对照：`_cmp5_名牌_off.png`（一块方底）vs `_cmp5_名牌_key.png`（**一个像素都没有**，
+"Airi / online" 直接浮在桌面上）。整窗图：`live5_off.png` / `live5_key.png`。
+
+`key` 那次剩下的 1.66% 是**模型自己的白美术**（蕾丝头饰、白书桌板）—— 它不是 bug，
+而且正是底板要框住的东西。
+
+### 7) pad 放宽（以前是越小越好，现在无所谓）
+
+气泡 5 → **8**、名牌 3 → **4**。pad 环现在是真的透明了，留大一点反而对点击手感好。
+⚠️ **气泡 pad 必须 ≥ 7**：`.bubble::after` 那个尾巴是向下伸 7px 的，
+pad 小于它就会被 region 裁掉。
+
+### 8) 顺手做掉的两件事
+
+- **底板从白卡改成蓝色水族箱**（用户要求）：缸壁 2px 玻璃边 + 水面高光带 +
+  `repeating-linear-gradient(102deg)` 斜射光柱 + 缸底沙地 + 4 颗上浮气泡，
+  **全纯 CSS 渐变**，不用 `filter` / `backdrop-filter` / `mix-blend-mode`
+  （透明窗口上这三样都会出事）。`frame` 模式会 `display:none` 掉缸内装饰只留边框。
+  预览：`ui_preview_square.png` / `ui_preview.png`（`probe_ui_preview.py` 渲染真页面）。
+- 验收：`verify_click_region` 通过、`verify_silhouette_js` **26/26**、`verify_pet_ui` 通过、
+  `node --check` 通过。
+
+### 9) 踩到的两个坑（都不是产品问题，是工具问题）
+
+1. **同一条消息里对同一个文件发两次编辑，会丢一次。** 本轮 `standalone.py` 的
+   `_after_window_ready` 改上了、import 没改上；`main.py` 正好相反 —— 于是真窗口跑出
+   `NameError: name 'fix_window_background' is not defined`。**改同一文件要串行。**
+2. **`probe_live_fix5.py` 第一版只按 pid 找窗口，一个都没命中**（日志里明明有 hwnd）。
+   改成"标题 `== 'Airi'` 或 pid 命中"双判据，并把这一轮看到的顶层窗口原样打出来 ——
+   否则下次还是只有一句没信息量的 FAIL。
+
+
 
 ## 怎么跑
 
