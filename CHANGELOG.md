@@ -1,5 +1,50 @@
 # Change Log
 
+## [0.3.4] — 2026-09-23（未发布）
+
+> 用户报回归："点击没反应、也不能拖动"。本轮把输入链路测成了数，
+> 找到两个**真窗口级别的硬伤**，并给前端装上了"黑匣子"。
+
+### Fixed
+- **`.NET TransparencyKey` 会把窗口打成"不可见 + 鼠标穿透"**（第六轮根因一）
+  - 隔离实验（`live2d_probe/winbg_fix6.txt`）：给干净 Form 赋
+    `TransparencyKey`，`GetLayeredWindowAttributes` 读回
+    `flags=LWA_ALPHA alpha=0` —— **不是** `LWA_COLORKEY`。
+    alpha=0 的分层窗口 = 看不见 + 对鼠标完全穿透。
+  - 修法：不再碰 .NET 属性，改为 ctypes 直接 `SetLayeredWindowAttributes`，
+    并**打完读回验证**（返回成功≠状态正确）。
+- **颜色键（LWA_COLORKEY）整窗鼠标穿透，且键色在本机不可控**（第六轮根因二）
+  - 真窗实测（`live2d_probe/live_fix6.txt`）：颜色键状态下
+    `WindowFromPoint` 对窗口内 8/8 个采样点全部命中**桌面**
+    （"Program Manager"）—— WebView2 的 DirectComposition 内容不在
+    颜色键的鼠标判定面（GDI 表面）里，键控后整窗穿透，
+    表现正是"**看得见但点不着**"。
+  - 手动 `SetLayeredWindowAttributes(LWA_COLORKEY, #010203)` 五种写法
+    （windll/WinDLL/显式 DWORD/Show 后再打/再打一次）键色读回**全部是
+    `#000000`**（`colorkey_test2.txt`）—— 挖洞行为不可控。
+  - **结论：颜色键路线整体弃用。** `AIRI_WIN_BG` 默认从 `key` 改为
+    **`dark`**（只把 Form 底色压黑，完全不碰分层 —— 输入路径与 v0.3.2
+    完全一致）。`key` 保留为 opt-in 实验，`off` 不变。
+- **"块状白"改用"最小 pad + 细黑边"方案**
+  - Form 底色压黑后，pad 环露出的就是细黑边（视觉上是一条投影线）。
+  - `collectUiRects()` pad 从"气泡 8 / 名牌 4"收窄为 **1px**；
+    气泡尾巴（盒外 14×7 三角形）改为**单独成矩形**并进 region，
+    不再靠整条 8px 的 pad 带。
+- **跨线程 WinForms 属性访问全部 BeginInvoke 编组到 GUI 线程**
+  - `_after_window_ready` 跑在 pywebview 的后台线程；v0.3.3 在那里直接
+    赋 `form.BackColor`/`TransparencyKey`（后者内部 `RecreateHandle()`）。
+    WinForms 控件非线程安全，跨线程属性访问有把 GUI 线程搞挂的风险
+    —— 现在一律 `form.BeginInvoke(MethodInvoker(...))`。
+- **前端 JS 黑匣子**：`window.onerror` / `unhandledrejection` → HTTP 上报
+  宿主日志（`[airi-js] ERROR ...`）；新增 `WindowAPI.ping()` 桥自检，
+  前端启动时立即 + `pywebviewready` 各打一次（`[airi-js] bridge ping ...`）。
+  再出"点击没反应"时，日志能直接分辨：页面崩了 / 桥没注入 / 前端没命中。
+
+### Verified
+- 真窗实测：`dark` 模式窗口**非分层**（无 alpha、无颜色键），
+  输入路径与 v0.3.2 一致；`key` 模式整窗穿透（即本轮修掉的回归机制）。
+- `verify_pet_ui` / `verify_silhouette_js` / py_compile 全部通过。
+
 ## [0.3.3] — 2026-09-23（未发布）
 
 > 这一版**推翻了 0.3.2 对"块状白"的判断**，并且这次是在**真窗口**上做了 A/B，

@@ -3,7 +3,7 @@
 > **Airi（愛莉）** — 一个傲娇的二次元桌宠，陪伴你在 VS Code 中写代码。
 > 她会监控你的 C/C++/Python 编译错误，用毒舌又暖心的方式吐槽你的 bug。
 
-当前版本：**v0.3.3**
+当前版本：**v0.3.4**
 
 > ⚠️ **素材版权**：本项目内置的 Live2D 模型 **不是本项目原创**，来自
 > [A8Chann/dsh-pet-live2d](https://github.com/A8Chann/dsh-pet-live2d)，许可为
@@ -270,7 +270,7 @@ data: {"type":"errorAlert","payload":{"text":"笨蛋！括号都配不对！","e
 | `AIRI_LIVE2D=0` | 强制关闭 Live2D，回到原来的图片/CSS 角色 |
 | `AIRI_SILHOUETTE=0` | 关闭窗口形状裁剪，即**放弃鼠标点穿**（整块矩形的点击都归桌宠）。**不影响画面透明** |
 | `AIRI_CARD=<模式>` | 角色底板（水族箱）：`off` / `tight` / `square`（默认）/ `frame` / `all`，见下文「块状白」 |
-| `AIRI_WIN_BG=<模式>` | 宿主 Form 底色的处理方式：`key`（默认，设成 `#010203` 并当 `TransparencyKey` 挖成洞）/ `dark`（只压暗不打洞的退路）/ `off`（不动，做 A/B 用）。**"块状白"的真正开关**，见下文 |
+| `AIRI_WIN_BG=<模式>` | 宿主 Form 底色的处理方式：`dark`（默认，只压黑、不碰分层，输入路径与 v0.3.2 一致）/ `key`（opt-in 实验：颜色键挖洞 —— 本机实测会整窗鼠标穿透，勿用）/ `off`（不动，做 A/B 用）。见下文「块状白」 |
 | `AIRI_CUBISM_CORE=<路径>` | 指定 Cubism Core 的 js 文件位置 |
 | `AIRI_ASSET_PORT=<端口>` | 固定素材服务器端口（默认自动选空闲端口） |
 
@@ -442,9 +442,14 @@ Form 就保持 WinForms 默认的 `SystemColors.Control`，浅色主题下 = **`
 | `Airi` | 33×15.6 | 3 | 39×21.6 | **40×20** ✓ |
 | `online` | 37×14 | 3 | 43×20 | **44×20** ✓ |
 
-修法：`common.fix_window_background()` 把 Form 底色设成 `#010203`（画面上不可能出现的
-颜色）并拿它当 `TransparencyKey` ⇒ 那些像素被**真挖成洞**（桌面透出来，而且自动点穿）。
-`AIRI_WIN_BG=key`（默认）/ `dark`（只压暗、不打洞，退路）/ `off`（做 A/B 用）。
+修法（v0.3.4 修订）：颜色键路线**已弃用** —— 真窗实测发现颜色键会让
+WebView2 内容**整窗鼠标穿透**（"看得见但点不着"，见 `live2d_probe/live_fix6.txt`：
+8/8 个采样点全部命中桌面），且 `.NET TransparencyKey` 属性会把窗口打成
+`alpha=0`（不可见 + 穿透，`winbg_fix6.txt`）。现在默认 **`dark`**：
+`fix_window_background()` 只把 Form 底色压黑（.NET 属性访问全部
+`BeginInvoke` 编组到 GUI 线程），同时 `collectUiRects()` 的 pad 收窄到 1px、
+气泡尾巴单独成矩形 —— pad 环露出的只剩一条细黑边，视觉上就是投影线。
+`AIRI_WIN_BG=dark`（默认）/ `key`（opt-in 实验，本机会整窗穿透，勿用）/ `off`。
 
 真窗口 A/B（`live2d_probe/probe_live_fix5.py`，数据见 `live2d_probe/live_fix5.txt`）：
 
