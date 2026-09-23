@@ -401,6 +401,10 @@ class _RECT(ctypes.Structure):
                 ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
 
 
+class _POINT(ctypes.Structure):
+    _fields_ = [('x', ctypes.c_long), ('y', ctypes.c_long)]
+
+
 # --- 宿主 Form 的底色（第五轮找到的"块状白"真正来源）------------------------
 #
 # pywebview 的 winforms.py:286-292 在 transparent=True 时只做了两件事：
@@ -588,7 +592,12 @@ def fix_window_background(window):
 
 
 def _apply_window_region(window, rects, vw, vh):
-    """按前端上报的矩形重建窗口 region。
+    """按前端上报的形状重建窗口 region。
+
+    第七轮起 region 从「矩形 + pad」升级成「与页面绘制同形状」，消灭黑边：
+      * [l, t, r, b]              纯矩形（Live2D 轮廓扫描的行程矩形还在用）
+      * {l,t,r,b, rad}            圆角矩形（气泡 14 / 名牌板 10 / 角色卡 16）
+      * {poly: [[x,y], ...]}      多边形（气泡尾巴的三角形）
 
     两组换算缺一不可：
       * 页面 CSS 像素 -> 窗口客户区**物理**像素（1.25 / 1.5 缩放很常见，
@@ -615,11 +624,20 @@ def _apply_window_region(window, rects, vw, vh):
     user32 = ctypes.windll.user32
     gdi32 = ctypes.windll.gdi32
     user32.GetClientRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-    gdi32.ExtCreateRegion.restype = ctypes.c_void_p
-    gdi32.ExtCreateRegion.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
-                                      ctypes.c_void_p]
     user32.SetWindowRgn.restype = ctypes.c_int
     user32.SetWindowRgn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
+    for fn, name in ((user32.CreateRectRgn, 'CreateRectRgn'),
+                     (gdi32.CreateRoundRectRgn, 'CreateRoundRectRgn'),
+                     (gdi32.CreatePolygonRgn, 'CreatePolygonRgn')):
+        fn.restype = ctypes.c_void_p
+    gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_long] * 6
+    gdi32.CreatePolygonRgn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+    gdi32.CombineRgn.restype = ctypes.c_int
+    gdi32.CombineRgn.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                 ctypes.c_void_p, ctypes.c_int]
+    gdi32.DeleteObject.argtypes = [ctypes.c_void_p]
+    RGN_OR = 2        # NULLREGION=1 RGN_OR=2 XOR=3 ...
+    WINDING = 2       # ALTERNATE=1 WINDING=2
 
     rc = _RECT()
     if not user32.GetClientRect(hwnd, ctypes.byref(rc)):
@@ -632,40 +650,92 @@ def _apply_window_region(window, rects, vw, vh):
     sx, sy = cw / vw, ch / vh
     meta['scale'] = '%.4f,%.4f' % (sx, sy)
 
-    packed = []
+    def _clip_x(v):
+        return max(0, min(cw, v))
+
+    def _clip_y(v):
+        return max(0, min(ch, v))
+
+    h_total = user32.CreateRectRgn(0, 0, 0, 0)   # 空区域，逐块 RGN_OR 并进去
+    if not h_total:
+        return {'ok': False, 'why': 'CreateRectRgn failed', 'meta': meta}
+    kept = 0
     minx, miny, maxx, maxy = cw, ch, 0, 0
-    for r in rects:
+
+    def _merge(h_piece):
+        # 合并成功后 piece 归 h_total 所有，必须删掉 piece 句柄防泄漏
+        rc2 = gdi32.CombineRgn(h_total, h_total, h_piece, RGN_OR)
+        gdi32.DeleteObject(h_piece)
+        return rc2
+
+    try:
+        for entry in rects:
+            h_piece = None
+            try:
+                if isinstance(entry, dict):
+                    if entry.get('poly'):
+                        pts = []
+                        for p in entry['poly']:
+                            px = _clip_x(int(round(float(p[0]) * sx)))
+                            py = _clip_y(int(round(float(p[1]) * sy)))
+                            pts.append(_POINT(px, py))
+                        if len(pts) < 3:
+                            continue
+                        arr = (_POINT * len(pts))(*pts)
+                        h_piece = gdi32.CreatePolygonRgn(
+                            arr, len(pts), WINDING)
+                        xs = [p.x for p in pts]
+                        ys = [p.y for p in pts]
+                        l, t, r, b = min(xs), min(ys), max(xs), max(ys)
+                    else:
+                        l = _clip_x(int(round(float(entry['l']) * sx)))
+                        t = _clip_y(int(round(float(entry['t']) * sy)))
+                        r = _clip_x(int(round(float(entry['r']) * sx)))
+                        b = _clip_y(int(round(float(entry['b']) * sy)))
+                        rad = float(entry.get('rad', 0) or 0)
+                        if r <= l or b <= t:
+                            continue
+                        if rad > 0.5:
+                            ew = max(2, int(round(rad * sx * 2)))
+                            eh = max(2, int(round(rad * sy * 2)))
+                            h_piece = gdi32.CreateRoundRectRgn(
+                                l, t, r, b, ew, eh)
+                        else:
+                            h_piece = user32.CreateRectRgn(l, t, r, b)
+                else:
+                    l = _clip_x(int(round(float(entry[0]) * sx)))
+                    t = _clip_y(int(round(float(entry[1]) * sy)))
+                    r = _clip_x(int(round(float(entry[2]) * sx)))
+                    b = _clip_y(int(round(float(entry[3]) * sy)))
+                    if r <= l or b <= t:
+                        continue
+                    h_piece = user32.CreateRectRgn(l, t, r, b)
+            except (TypeError, ValueError, IndexError, KeyError):
+                continue
+            if not h_piece:
+                continue
+            minx = min(minx, l); miny = min(miny, t)
+            maxx = max(maxx, r); maxy = max(maxy, b)
+            _merge(h_piece)
+            kept += 1
+
+        meta['kept'] = kept
+        if not kept:
+            return {'ok': False, 'why': 'all rects clipped away', 'meta': meta}
+
+        # SetWindowRgn 成功后 region 归系统所有，不能再 DeleteObject
+        if not user32.SetWindowRgn(hwnd, h_total, True):
+            gdi32.DeleteObject(h_total)
+            return {'ok': False, 'why': 'SetWindowRgn failed', 'meta': meta}
+        meta['bbox'] = '%d,%d,%d,%d' % (minx, miny, maxx, maxy)
+        return {'ok': True, 'rects': kept, 'meta': meta}
+    except Exception:
+        # 兜底：句柄还没交给系统，得自己删
         try:
-            l = int(round(float(r[0]) * sx)); t = int(round(float(r[1]) * sy))
-            rr = int(round(float(r[2]) * sx)); b = int(round(float(r[3]) * sy))
-        except (TypeError, ValueError, IndexError):
-            continue
-        l = max(0, min(cw, l)); rr = max(0, min(cw, rr))
-        t = max(0, min(ch, t)); b = max(0, min(ch, b))
-        if rr <= l or b <= t:
-            continue
-        packed.append((l, t, rr, b))
-        minx = min(minx, l); miny = min(miny, t)
-        maxx = max(maxx, rr); maxy = max(maxy, b)
-
-    meta['kept'] = len(packed)
-    if not packed:
-        return {'ok': False, 'why': 'all rects clipped away', 'meta': meta}
-
-    import struct
-    n = len(packed)
-    # RGNDATAHEADER 恰好 32 字节：dwSize/iType/nCount/nRgnSize + rcBound(16)
-    blob = (struct.pack('<IIIIiiii', 32, 1, n, n * 16, minx, miny, maxx, maxy)
-            + b''.join(struct.pack('<iiii', *r) for r in packed))
-    buf = ctypes.create_string_buffer(blob, len(blob))
-    hrgn = gdi32.ExtCreateRegion(None, len(blob), buf)
-    if not hrgn:
-        return {'ok': False, 'why': 'ExtCreateRegion failed', 'meta': meta}
-    # SetWindowRgn 成功后 region 归系统所有，不能再 DeleteObject
-    if not user32.SetWindowRgn(hwnd, hrgn, True):
-        return {'ok': False, 'why': 'SetWindowRgn failed', 'meta': meta}
-    meta['bbox'] = '%d,%d,%d,%d' % (minx, miny, maxx, maxy)
-    return {'ok': True, 'rects': n, 'meta': meta}
+            gdi32.DeleteObject(h_total)
+        except Exception:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------

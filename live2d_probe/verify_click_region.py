@@ -166,7 +166,7 @@ check('角色底板接的是**实测外接框**、且采样后锁定（避免跟
 check('底板只在 Live2D 就绪后才显示（图片兜底角色时 z-index:0 会盖住 #charImg）',
       'card-on' in UI and 'z-index: 0' in UI, '')
 check('底板并进窗口形状（否则实心卡会被 region 裁掉）',
-      'pairs.push([charCard, 0])' in UI, '')
+      "contains('card-on'))" in UI and 'rad: 16' in UI, '')
 
 # ===========================================================================
 # B. 异形窗口

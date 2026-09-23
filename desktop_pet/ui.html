@@ -11,7 +11,8 @@
       --text: #eef0f6;
       --muted: #8888aa;
       --error-border: #ff4757;
-      --bubble-bg: rgba(26, 36, 60, 0.92);
+      --bubble-bg: #1a243c;   /* ⚠️ 必须不透明：region 里露出的 Form 底是黑的，
+                                 半透明气泡会跟黑底混出一圈暗边（第七轮"黑边"） */
       --hair: #f8a4c2;
       --hair-dark: #e8789a;
       --skin: #ffe4d0;
@@ -58,7 +59,10 @@
       border: 1px solid transparent;
       background:
         linear-gradient(var(--bubble-bg), var(--bubble-bg)) padding-box,
-        linear-gradient(135deg, rgba(255,107,157,0.55), rgba(192,132,252,0.35), rgba(255,107,157,0.2)) border-box;
+        /* 边框渐变必须用不透明色：这里原来写 rgba(...,0.55) 之类，
+           在黑底 Form 上会混成暗边（第七轮"黑边"的来源之一）。
+           三个色值就是原 rgba 各自「混在黑底上」的等效不透明色，观感不变。 */
+        linear-gradient(135deg, #8c3b56, #432e58, #33151f) border-box;
       /* ⚠️ 这里曾经有一行 backdrop-filter: blur(10px)。
          在**透明窗口**上它是有害的：backdrop-filter 要找"背后有什么"来做模糊，
          而窗口背后是桌面、不在这张合成图里 —— Chromium 会退化成给这层糊一块
@@ -81,26 +85,27 @@
       background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
       border-radius: 1px;
     }
-    /* 气泡尾巴 */
+    /* 气泡尾巴：必须不透明（半透明的尾巴在黑底 Form 上混成近黑色块）。
+       颜色 = --bubble-bg，跟气泡底同色，接缝处才连续。 */
     .bubble::after {
       content: ''; position: absolute; bottom: -7px; left: 50%;
       transform: translateX(-50%);
       width: 0; height: 0;
       border-left: 7px solid transparent;
       border-right: 7px solid transparent;
-      border-top: 7px solid rgba(200, 130, 170, 0.45);
+      border-top: 7px solid var(--bubble-bg);
     }
     .bubble.error {
       background:
-        linear-gradient(rgba(60, 22, 30, 0.92), rgba(60, 22, 30, 0.92)) padding-box,
-        linear-gradient(135deg, rgba(255,71,87,0.7), rgba(255,120,100,0.35)) border-box;
+        linear-gradient(#37141c, #37141c) padding-box,
+        linear-gradient(135deg, #b3323d, #592a23) border-box;
       box-shadow:
         0 4px 18px rgba(0, 0, 0, 0.4),
         0 0 24px rgba(255, 71, 87, 0.15),
         inset 0 1px 0 rgba(255, 255, 255, 0.05);
       animation: popUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), shake 0.35s 0.38s ease;
     }
-    .bubble.error::after { border-top-color: rgba(255, 71, 87, 0.55); }
+    .bubble.error::after { border-top-color: #37141c; }
     .bubble.old {
       opacity: 0.45; transform: scale(0.92);
       transition: all 0.5s ease;
@@ -178,10 +183,13 @@
       background: linear-gradient(180deg,
         #ddf4ff 0%, #a9def7 13%, #6ec4ea 36%,
         #3f97cf 63%, #2a6fa4 85%, #1b4c76 100%);
-      border: 2px solid rgba(228, 246, 255, 0.85);   /* 玻璃缸壁 */
+      /* 缸壁必须不透明：0.85 的玻璃沿在黑底 Form 上会混出暗环（第七轮"黑边"）。
+         box-shadow 原来那个 1px 深色外圈画在 border-box 之外 —— 会被 region
+         裁掉根本看不见，改成 inset 让它真的落在缸壁内侧。 */
+      border: 2px solid #e4f6ff;
       box-shadow:
-        0 0 0 1px rgba(10, 44, 72, 0.55),
-        0 6px 22px rgba(0, 0, 0, 0.38);
+        inset 0 0 0 1px rgba(10, 44, 72, 0.55),
+        inset 0 6px 22px rgba(0, 0, 0, 0.38);
       pointer-events: none;
     }
     body.card-on .character-card { display: block; }
@@ -481,6 +489,17 @@
     }
 
     /* ===== 名字和状态 ===== */
+    /* 名牌底板：必须是一块**不透明**的板。原来名字/状态直接写在透明页面上，
+       region 的矩形里除字形外全是黑底 Form —— 看着像一块方黑牌，四角还是直角。
+       现在由页面自己画板（圆角 + 深蓝黑），region 按同圆角裁，与气泡同构。 */
+    .pet-plate {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 3px 12px 4px;
+      border-radius: 10px;
+      background: #161a2e;
+      border: 1px solid rgba(255, 107, 157, 0.28);
+      pointer-events: auto; cursor: default;
+    }
     .pet-name {
       font-size: 13px; font-weight: 700;
       letter-spacing: 3px;
@@ -521,7 +540,7 @@
     /* ===== 右键菜单 ===== */
     .context-menu {
       position: fixed;
-      background: rgba(22, 24, 40, 0.97);
+      background: #161828;   /* 不透明：菜单现在并进 region，半透明会在黑底 Form 上发暗 */
       /* 同 .bubble：透明窗口上 backdrop-filter 会糊出一块不透明的底 */
       border: 1px solid rgba(255,107,157,0.25);
       border-radius: 10px; padding: 5px;
@@ -605,9 +624,11 @@
       </div>
     </div>
     <div class="ground-shadow"></div>
-    <div class="pet-name">Airi</div>
-    <div class="pet-status">
-      <span class="dot" id="dot"></span><span id="statusLabel">connecting...</span>
+    <div class="pet-plate" id="petPlate">
+      <div class="pet-name">Airi</div>
+      <div class="pet-status">
+        <span class="dot" id="dot"></span><span id="statusLabel">connecting...</span>
+      </div>
     </div>
   </div>
 
@@ -1112,44 +1133,49 @@
                                  // 否则会出现"轮廓对但点哪儿都说话"或反过来的错配。
 
     function collectUiRects() {
+      /* 第七轮："黑边"的彻底修法 —— region 从「矩形 + pad」升级成
+         「与页面绘制**同形状**」：
+           * 气泡        → 圆角矩形（rad=14，与 border-radius 一致）
+           * 气泡尾巴    → 三角形多边形（14 宽 7 高，跟 ::after 逐像素对齐）
+           * 名牌底板    → 圆角矩形（rad=10，板由 .pet-plate 自己画）
+           * 角色卡      → 圆角矩形（rad=16，与 border-radius 一致）
+           * 右键菜单    → 圆角矩形（rad=10，弹出/收起都重推形状）
+         pad 全部归零：任何 pad 环里页面都没画东西，dark 模式下露的就是
+         黑底 Form —— 这就是用户截图里的"黑边"。背景见
+         common.py fix_window_background 的长注释（颜色键路线已弃用）。 */
       var out = [];
-      var pairs = [];
-      // pad 是给 region 留的余量。region 只做鼠标点穿，但它的矩形是"DOM 盒 + pad"，
-      // 那一圈 pad 环里页面什么都没画 —— 露出的是宿主 Form 的底色，
-      // 早先 Form 是 #F0F0F0 时这就是**块状白**的来源。
-      // 第六轮结论（见 common.py fix_window_background 的长注释）：颜色键路线
-      // 已弃用 —— .NET TransparencyKey 会把窗口打成 alpha=0（不可见+穿透），
-      // 手动 LWA_COLORKEY 的键色在这台 Windows 上读回恒 0（不可控），而且
-      // 颜色键作用在 GDI 表面上，很可能让 WebView2 的 DirectComposition 内容
-      // 整体鼠标穿透（"看得见点不着"）。
-      // 所以现在默认 dark 模式（Form 底色压黑），pad 收窄到 1px：
-      // 细黑边视觉上就是一条投影线，不再是块状白。
-      var PAD = 1;
       var bubbles = bubbleArea.querySelectorAll('.bubble');
       for (var i = 0; i < bubbles.length; i++) {
         var rb = bubbles[i].getBoundingClientRect();
         if (rb.width < 1 || rb.height < 1) continue;
-        out.push([rb.left - PAD, rb.top - PAD, rb.right + PAD, rb.bottom + PAD]);
-        // 气泡尾巴单独成矩形：14x7 的三角形画在盒外 bottom:-7px 处。
-        // 以前靠"整盒 pad=8"把它包进来，代价是整条 8px 的 pad 带露底色；
-        // 现在只给尾巴自己一个小矩形，露底面积只剩它四个角的 ~2px 黑点。
+        out.push({ l: rb.left, t: rb.top, r: rb.right, b: rb.bottom, rad: 14 });
+        // 气泡尾巴：::after 是 border 画的三角形，底边 14px、高 7px、尖朝下
         var cx = (rb.left + rb.right) / 2;
-        out.push([cx - 9, rb.bottom, cx + 9, rb.bottom + 9]);
+        out.push({ poly: [[cx - 7, rb.bottom], [cx + 7, rb.bottom],
+                          [cx, rb.bottom + 7]] });
       }
-      var nm = document.querySelector('.pet-name');
-      var st = document.querySelector('.pet-status');
-      if (nm) pairs.push([nm, PAD]);
-      if (st) pairs.push([st, PAD]);
+      var plate = document.getElementById('petPlate');
+      if (plate) {
+        var rp = plate.getBoundingClientRect();
+        if (rp.width > 1 && rp.height > 1) {
+          out.push({ l: rp.left, t: rp.top, r: rp.right, b: rp.bottom, rad: 10 });
+        }
+      }
       // 角色底板是一张**实心卡**，必须并进窗口形状 —— 否则它会被 region 裁掉，
-      // 表现成"卡只显示一部分"的怪样子。它已经是纯矩形，不用再加内边距。
+      // 表现成"卡只显示一部分"的怪样子。
       if (charCard && document.body.classList.contains('card-on')) {
-        pairs.push([charCard, 0]);
+        var cr = charCard.getBoundingClientRect();
+        if (cr.width > 1 && cr.height > 1) {
+          out.push({ l: cr.left, t: cr.top, r: cr.right, b: cr.bottom, rad: 16 });
+        }
       }
-      for (var j = 0; j < pairs.length; j++) {
-        var r = pairs[j][0].getBoundingClientRect();
-        if (r.width < 1 || r.height < 1) continue;
-        var pad = pairs[j][1];
-        out.push([r.left - pad, r.top - pad, r.right + pad, r.bottom + pad]);
+      // 右键菜单：弹出时并进形状（否则被 region 裁成"看不见的菜单"），
+      // 收起时 class 移除后这里自然就不再上报
+      if (contextMenu && contextMenu.classList.contains('show')) {
+        var cm = contextMenu.getBoundingClientRect();
+        if (cm.width > 1 && cm.height > 1) {
+          out.push({ l: cm.left, t: cm.top, r: cm.right, b: cm.bottom, rad: 10 });
+        }
       }
       return out;
     }
@@ -1461,8 +1487,15 @@
       contextMenu.style.left = e.clientX + 'px';
       contextMenu.style.top = e.clientY + 'px';
       contextMenu.classList.add('show');
+      // 菜单弹出后立刻重推窗口形状：否则菜单在 region 之外，被裁成"看不见的菜单"
+      if (typeof pushSilhouette === 'function') pushSilhouette(true);
     });
-    document.addEventListener('click', function() { contextMenu.classList.remove('show'); });
+    document.addEventListener('click', function() {
+      if (!contextMenu.classList.contains('show')) return;
+      contextMenu.classList.remove('show');
+      // 收起也要重推：把菜单那块从形状里摘掉
+      if (typeof pushSilhouette === 'function') pushSilhouette(true);
+    });
     // 屏蔽 frameless 窗口里的浏览器默认右键菜单（头像区已有自定义菜单）
     document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
     contextMenu.addEventListener('click', function(e) {
@@ -1471,6 +1504,7 @@
         try { if (window.pywebview && window.pywebview.api) window.pywebview.api.exit_app(); } catch (err) {}
       }
       contextMenu.classList.remove('show');
+      if (typeof pushSilhouette === 'function') pushSilhouette(true);
     });
 
     // ============ 气泡自动消失 ============
