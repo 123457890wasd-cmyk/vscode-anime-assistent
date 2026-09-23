@@ -80,6 +80,25 @@ class WindowAPI:
         self._input_log = None         # 点击/拖拽留痕，见 set_input_logger()
         self._click_calls = 0
         self._move_calls = 0
+        self._last_heartbeat = 0.0     # ui.html 每 2s 拍一次的 JS 存活时间戳（monotonic）
+        self._hb_warn_at = 0.0         # 上次心跳滞后告警的时刻（限频用）
+
+    def pet_heartbeat(self):
+        """ui.html 每 2 秒调一次：记录 JS 主线程的存活时间戳。
+
+        纯诊断用，不返回任何窗口状态。第十轮教训：页面定时器一旦被节流/冻结
+        （全透明异形窗口容易被 Chromium 的可见性启发式误判），region 就停在
+        过期形状、气泡 8s 自动消失也停摆 —— 以前这条链路是**完全静默**的，
+        用户只能看到"气泡被切了一截却永远不恢复"。
+        """
+        self._last_heartbeat = time.monotonic()
+        return True
+
+    def js_heartbeat_lag(self):
+        """距上次 JS 心跳的秒数；从没收到过心跳返回 None。"""
+        if not self._last_heartbeat:
+            return None
+        return time.monotonic() - self._last_heartbeat
 
     def set_input_logger(self, fn):
         """宿主注入日志函数：fn(str) —— 给「点击互动 / 拖拽」这条链路留痕。
@@ -245,6 +264,13 @@ class WindowAPI:
             if res.get('ok'):
                 self._region_last = res.get('rects')
             # 只在状态变化时打日志 + 失败时每 20 次补一条，保证日志不刷屏但绝不静默
+            # 心跳滞后 >3s 说明 JS 定时器正在被节流/冻结 —— 这时推上来的形状
+            # 很可能是过期的，而且之后不会再有更新来纠正它，必须留痕。
+            lag = self.js_heartbeat_lag()
+            if lag is not None and lag > 3.0 and time.monotonic() - self._hb_warn_at > 30:
+                self._hb_warn_at = time.monotonic()
+                self._log_region('WARNING: JS 心跳滞后 %.1fs —— 页面定时器可能被节流/冻结，'
+                                 '窗口形状可能停在过期状态' % lag)
             state = (bool(res.get('ok')), res.get('why'))
             if state != self._region_state or (
                     not res.get('ok') and self._region_calls % 20 == 0):

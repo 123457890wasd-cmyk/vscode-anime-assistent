@@ -50,10 +50,14 @@
       width: 100%; max-width: 264px;
       flex-shrink: 0;   /* 空间不足时宁可溢出窗口（fitBubbles 会裁旧气泡），
                            也绝不被 flex 压扁 —— 压扁就是把字揉在一起 */
-      display: flex; flex-direction: column-reverse;
+      display: flex; flex-direction: column;
       align-items: center; gap: 7px;
       margin-bottom: 8px;
       pointer-events: none;
+      /* 方向必须是 column（不是 column-reverse）：appendChild 的最新气泡
+         落在**最下面、贴着角色**，尾巴（::after 朝下）正好指向角色 ——
+         旧写法 column-reverse 会把最新气泡顶到最上面，尾巴指着下面那条
+         旧气泡，视觉是错的；而且溢出被切的是**最新**那条（第十轮截图）。 */
     }
     .bubble {
       position: relative; max-width: 100%;
@@ -942,9 +946,15 @@
     }
 
     // ============ 气泡逻辑 ============
+    // 最近一次气泡集合变动（新增/开始消失）的时间戳。
+    // popUp/fade-out 动画进行中 getBoundingClientRect 量到的是"位移+缩放"
+    // 之后的盒子 —— 拿它当 region 就会把气泡顶边裁掉十几像素。
+    var lastBubbleChangeAt = 0;
+
     function removeBubble(el) {
       if (el.dataset.removing) return;
       el.dataset.removing = '1';
+      lastBubbleChangeAt = Date.now();
       el.classList.add('fade-out');
       setTimeout(function() {
         el.remove();
@@ -969,14 +979,21 @@
 
     // 气泡区顶边不许越过视口顶（留 6px 呼吸）。超了就从最旧的开始**立刻**移除
     // （不走 450ms 渐隐，等不起）—— 绝不让窗口边缘把气泡文字横向切成两截。
-    // 只剩一条时不再裁，交给 .bubble 自身的 max-height 兜底。
+    // 只剩一条仍溢出时：把它的 max-height 压到可用高度内，在气泡自己的
+    // 圆角里截断（overflow:hidden），同样不让窗口上沿切字。
     function fitBubbles() {
       var guard = 0;
-      while (guard++ < 6) {
-        if (bubbleArea.getBoundingClientRect().top >= 6) return;
+      while (guard++ < 8) {
+        var box = bubbleArea.getBoundingClientRect();
+        if (box.top >= 6) return;
         var bs = bubbleArea.querySelectorAll('.bubble:not([data-removing])');
-        if (bs.length <= 1) return;
-        bs[0].remove();
+        if (bs.length > 1) { bs[0].remove(); continue; }
+        if (!bs.length) return;
+        // 区域 bottom 由下方（角色卡/名牌）钉死不随溢出变化，
+        // 可用高度 = bottom − 6px 顶部呼吸
+        var avail = Math.floor(box.bottom - 6);
+        if (avail > 60) bs[0].style.maxHeight = avail + 'px';
+        return;
       }
     }
 
@@ -1001,6 +1018,7 @@
       // 旧气泡不会被一路往上顶（用户截图里"互动过程很难看"的另一半原因）。
       el.textContent = text;
       bubbleArea.appendChild(el);
+      lastBubbleChangeAt = Date.now();
       fitBubbles();
       markOldBubbles();
       el.style.height = el.offsetHeight + 'px';   // 锁定高度再清空打字
@@ -1013,7 +1031,12 @@
       // 气泡一出现就得进窗口形状，否则要等下一次轮询 —— 那一瞬间气泡会被 region 裁掉。
       // 必须显式传 true：setTimeout(fn, 0) 按规范是**不带参数**调用的，
       // 写成 setTimeout(pushSilhouette, 0) 并不会把 force 传成真值。
+      // 此刻 CSS 动画还没跑第一帧，getBoundingClientRect 量到的是**最终位置** —— 形状正确。
       if (typeof pushSilhouette === 'function') setTimeout(function() { pushSilhouette(true); }, 0);
+      // 动画结束（400ms）后再确认一次：盖掉周期轮询万一在动画中途推上去的
+      // 过期形状（第十轮病灶：那之后页面一旦被冻结/节流，错误形状就永久驻留，
+      // 表现为最新气泡的顶边被水平切掉一截、8 秒自动消失也停摆）。
+      if (typeof pushSilhouette === 'function') setTimeout(function() { pushSilhouette(true); }, 540);
     }
 
     function setOnline(online) {
@@ -1455,6 +1478,12 @@
       // 连续失败后放慢重试，但**永不放弃** —— 模块加载顺序、窗口创建时机
       // 都可能让前几次失败，永久放弃等于把这条路焊死。上一版就是 3 次即止。
       if (!force && Date.now() < silNextAt) return;
+      // 气泡 popUp / fade-out 动画进行中（520ms 窗口）周期轮询**跳过**：
+      // 动画中的 getBoundingClientRect 是"位移+缩放"后的盒子，比最终位置
+      // 低十几像素，拿它当 region 就把气泡顶边裁掉一截；若之后页面被冻结，
+      // 这个错误形状会永久驻留（第十轮截图的来源）。force 推送不受限 ——
+      // showBubble 在动画第一帧之前推（最终位置），动画结束 540ms 再推一次。
+      if (!force && lastBubbleChangeAt && Date.now() - lastBubbleChangeAt < 520) return;
 
       var ch = characterRects();
       // 底板先于窗口形状更新：collectUiRects() 得把卡的位置算进去。
@@ -1578,6 +1607,18 @@
     }
     bridgeSelfTest('immediate');
     window.addEventListener('pywebviewready', function() { bridgeSelfTest('pywebviewready'); });
+
+    // ============ JS 心跳（第十轮诊断）============
+    // 每 2s 通过桥拍一次心跳，Python 侧记时间戳。定时器被节流/页面被冻结时
+    // 心跳滞后会被 standalone 写进日志 —— 上一轮"气泡被 region 永久裁掉一截"
+    // 的元凶（页面定时器停摆 → region 停在过期形状）就是靠这个才能在日志里
+    // 看见，否则整条链路又是静默的。
+    setInterval(function() {
+      try {
+        var hbApi = window.pywebview && window.pywebview.api;
+        if (hbApi && hbApi.pet_heartbeat) { hbApi.pet_heartbeat(); }
+      } catch (e) { /* 心跳失败不影响主流程 */ }
+    }, 2000);
   </script>
 </body>
 </html>

@@ -100,6 +100,32 @@ def push_message(msg_type: str, text: str, emotion: str = "idle"):
         )))
         if len(sse_queue) > MAX_QUEUE_SIZE:
             del sse_queue[:len(sse_queue) - MAX_QUEUE_SIZE]
+    _warn_if_js_stalled()
+
+
+_hb_warn_state = {'at': 0.0}
+
+def _warn_if_js_stalled():
+    """推送用户可见消息时顺带检查 JS 心跳（第十轮诊断）。
+
+    SSE 事件是网络驱动，不受页面定时器节流影响 —— 消息一定送达；但页面若
+    定时器停摆（节流/冻结），气泡虽然会显示，region 更新和 8s 自动消失
+    全都不会执行。在日志里留下这个状态，用户报"气泡被切/不消失"时一眼定位。
+    """
+    api = _api_ref
+    if api is None:
+        return
+    try:
+        lag = api.js_heartbeat_lag()
+    except Exception:
+        return
+    if lag is not None and lag > 3.0 and time.monotonic() - _hb_warn_state['at'] > 30:
+        _hb_warn_state['at'] = time.monotonic()
+        log(f'[airi-js] WARNING: 推送消息时 JS 心跳滞后 {lag:.1f}s '
+            '—— 页面定时器可能被节流/冻结（region 与气泡自动消失将停摆）')
+
+
+_api_ref = None   # main() 里创建 WindowAPI 后回填，供 push_message 检查心跳
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +345,7 @@ def _ping_ok(port: int) -> bool:
         return False
 
 def main():
+    global _api_ref
     try:
         PORT = int(os.environ.get('AIRI_STANDALONE_PORT', '') or 19876)
     except ValueError:
@@ -376,11 +403,23 @@ def main():
         except KeyboardInterrupt:
             pass
         sys.exit(1)
+    # WebView2 的后台节流会把"不可见/被遮挡"页面的定时器压到极低频甚至冻结。
+    # 桌宠是全透明异形窗口，最容易被 Chromium 的可见性启发式误判成后台页 ——
+    # 第十轮实锤：定时器停摆后 region 冻结在气泡动画中途量出的过期形状上，
+    # 最新气泡的顶边被永久裁掉一截，8s 自动消失也停摆。这些开关禁掉整类节流
+    # （WebView2 加载器在创建环境时读这个环境变量；setdefault 留出覆盖口子）。
+    os.environ.setdefault(
+        'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS',
+        '--disable-background-timer-throttling '
+        '--disable-renderer-backgrounding '
+        '--disable-backgrounding-occluded-windows '
+        '--disable-features=IntensiveWakeUpThrottling')
     screen_w, screen_h = get_screen_size()
     win_w, win_h = 300, 480
     x = screen_w - win_w - 40
     y = screen_h - win_h - 120
     api = WindowAPI()
+    _api_ref = api                 # push_message 借此检查 JS 心跳
     api.set_click_handler(_pick_click_line)   # 点角色 -> 取一句台词
     api.set_region_enabled(sil)               # 异形窗口开关（前端也会自己判断一次）
     # 异形窗口必须留痕：这条链路跨 JS -> pywebview 桥 -> ctypes -> Win32 四层，
