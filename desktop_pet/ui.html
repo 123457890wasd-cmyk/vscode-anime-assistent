@@ -154,32 +154,87 @@
       75% { transform: translateY(-2px) rotate(-0.5deg); }
     }
 
-    /* ===== 角色底板（把"块状白"拢成一张干净的卡）=====
+    /* ===== 角色底板：蓝色水族箱（第五轮重做）=====
        这个模型自带不少纯白美术：白色蕾丝女仆头饰、白色书桌板、巴菲上的奶油。
-       窗口真透明之后，这些白在深色桌面上散成好几块碎白，看起来像渲染坏了。
-       垫一张紧贴角色**实测外接框**的卡，碎白就并进同一张卡里，边界消失。
+       垫一张紧贴角色**实测外接框**的底板，碎白就并进同一张底里、边界消失。
+       第四轮垫的是白卡；用户看过之后要的是"蓝色水族箱的环境"，于是第五轮
+       把这张卡做成一缸水：缸壁 + 水面高光 + 斜射光柱 + 沙地 + 上浮气泡。
        - 位置/大小由 JS 按 canvas 的 alpha 实测给出（"最小"=实测框+内边距，
          不是写死 .character-box 的 160x210 —— 那比角色本身大一圈）
        - position: fixed + z-index:0：必须落在 canvas(z-index:1) 之下，
          否则会把角色盖住；fixed 让 bbox 可以直接用视口坐标，无需换算
        - pointer-events:none：不能吃掉拖拽窗口的手势
        - 只在 Live2D 就绪后由 JS 加 body.card-on 才显示；图片/CSS 兜底角色
-         时不显示（那时 z-index:0 会盖住 #charImg，反而更糟） */
+         时不显示（那时 z-index:0 会盖住 #charImg，反而更糟）
+       - ⚠️ 不要用 filter / backdrop-filter / mix-blend-mode：透明窗口上
+         filter 会把元素提升成独立合成层，层底有可能被栅格化成不透明；
+         backdrop-filter 更糟（窗口背后是桌面，不在合成图里，必然退化成一块实底）。
+         这一缸水全部只用渐变 + 边框，足够好看。 */
     .character-card {
       display: none;
       position: fixed; z-index: 0;
-      border-radius: 18px;
-      background: #fdfdff;
-      box-shadow: 0 6px 22px rgba(0, 0, 0, 0.38);
+      border-radius: 16px;
+      overflow: hidden;                       /* 光柱/沙地跟着缸壁圆角裁 */
+      background: linear-gradient(180deg,
+        #ddf4ff 0%, #a9def7 13%, #6ec4ea 36%,
+        #3f97cf 63%, #2a6fa4 85%, #1b4c76 100%);
+      border: 2px solid rgba(228, 246, 255, 0.85);   /* 玻璃缸壁 */
+      box-shadow:
+        0 0 0 1px rgba(10, 44, 72, 0.55),
+        0 6px 22px rgba(0, 0, 0, 0.38);
       pointer-events: none;
     }
     body.card-on .character-card { display: block; }
-    /* 变体：只描一圈白框，卡内照旧透出桌面 */
+    /* 水面高光：缸口第一层水被光打亮 */
+    .character-card .tank-surface {
+      position: absolute; left: 0; right: 0; top: 0; height: 24%;
+      background: linear-gradient(180deg,
+        rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.06) 55%,
+        rgba(255, 255, 255, 0) 100%);
+      pointer-events: none;
+    }
+    /* 斜射光柱：repeating-linear-gradient 就是水面上的光带 */
+    .character-card .tank-rays {
+      position: absolute; left: -30%; right: -30%; top: 0; height: 80%;
+      background: repeating-linear-gradient(102deg,
+        rgba(255, 255, 255, 0.17) 0px, rgba(255, 255, 255, 0.17) 7px,
+        rgba(255, 255, 255, 0) 7px, rgba(255, 255, 255, 0) 32px);
+      pointer-events: none;
+    }
+    /* 缸底沙地 */
+    .character-card .tank-sand {
+      position: absolute; left: 0; right: 0; bottom: 0; height: 24%;
+      background: radial-gradient(140% 120% at 50% 108%,
+        rgba(255, 236, 184, 0.92) 0%, rgba(255, 228, 164, 0.4) 52%,
+        rgba(255, 226, 160, 0) 78%);
+      pointer-events: none;
+    }
+    /* 上浮气泡 */
+    .character-card .tank-bubble {
+      position: absolute; bottom: 2px;
+      width: 6px; height: 6px; border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      background: radial-gradient(circle at 34% 30%,
+        rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.12) 62%,
+        rgba(255, 255, 255, 0) 100%);
+      animation: tankBubbleUp 7.5s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes tankBubbleUp {
+      0%   { transform: translateY(0) scale(0.6); opacity: 0; }
+      15%  { opacity: 0.9; }
+      85%  { opacity: 0.9; }
+      100% { transform: translateY(-150px) scale(1.1); opacity: 0; }
+    }
+    /* 变体：只描一圈玻璃边，缸内照旧透出桌面 */
     body.card-frame .character-card {
       background: transparent;
-      border: 1.5px solid rgba(255, 255, 255, 0.85);
-      box-shadow: 0 0 14px rgba(255, 255, 255, 0.28);
+      overflow: visible;
+      border: 1.5px solid rgba(180, 230, 255, 0.9);
+      box-shadow: 0 0 14px rgba(140, 210, 255, 0.35);
     }
+    /* frame 模式下缸内装饰全部隐藏（只留边框） */
+    body.card-frame .character-card > * { display: none; }
 
     /* 地面阴影 */
     .ground-shadow {
@@ -506,8 +561,17 @@
 </head>
 <body>
 
-  <!-- 角色底板：垫在角色与名字底下的一张白卡（位置由 JS 实测，见 .character-card） -->
-  <div class="character-card" id="charCard"></div>
+  <!-- 角色底板：一缸蓝色的水（位置/大小由 JS 按实测角色外接框给出，见 .character-card）
+       缸内装饰纯 CSS 渐变，不用 filter（透明窗口上 filter 会出问题） -->
+  <div class="character-card" id="charCard">
+    <div class="tank-rays"></div>
+    <div class="tank-surface"></div>
+    <div class="tank-sand"></div>
+    <span class="tank-bubble" style="left:12%"></span>
+    <span class="tank-bubble" style="left:36%; width:4px; height:4px; animation-delay:1.7s"></span>
+    <span class="tank-bubble" style="left:61%; animation-delay:3.3s"></span>
+    <span class="tank-bubble" style="left:85%; width:5px; height:5px; animation-delay:5.1s"></span>
+  </div>
 
   <!-- 气泡展示区 -->
   <div class="bubble-area" id="bubbleArea"></div>
@@ -1024,12 +1088,20 @@
     function collectUiRects() {
       var out = [];
       var pairs = [];
+      // pad 是给 region 留的余量。region 只做鼠标点穿，但它的矩形是"DOM 盒 + pad"，
+      // 那一圈 pad 环里页面什么都没画 —— 早先这里就是**块状白的来源**：
+      // 环里露出的是宿主 Form 的底色（WinForms 默认 #F0F0F0）。
+      // 现在 Form 底色被设成了颜色键并开了 TransparencyKey（见 common.py
+      // fix_window_background()），环里的像素会被真挖成洞 ⇒ 不可见。
+      // 所以 pad 可以放心留大一点，改善点击手感。
+      var PAD_BUBBLE = 8;   // ⚠️ 必须 >= .bubble::after 尾巴伸出的 7px，否则尾巴被裁掉
+      var PAD_NAME = 4;
       var bubbles = bubbleArea.querySelectorAll('.bubble');
-      for (var i = 0; i < bubbles.length; i++) pairs.push([bubbles[i], 5]);
+      for (var i = 0; i < bubbles.length; i++) pairs.push([bubbles[i], PAD_BUBBLE]);
       var nm = document.querySelector('.pet-name');
       var st = document.querySelector('.pet-status');
-      if (nm) pairs.push([nm, 3]);
-      if (st) pairs.push([st, 3]);
+      if (nm) pairs.push([nm, PAD_NAME]);
+      if (st) pairs.push([st, PAD_NAME]);
       // 角色底板是一张**实心卡**，必须并进窗口形状 —— 否则它会被 region 裁掉，
       // 表现成"卡只显示一部分"的怪样子。它已经是纯矩形，不用再加内边距。
       if (charCard && document.body.classList.contains('card-on')) {
