@@ -16,7 +16,9 @@ HTTP 服务器），接收消息并显示为可拖动的透明无边框桌面窗
 import sys
 import argparse
 
-from common import get_screen_size, WindowAPI, load_html, create_temp_html
+from common import (get_screen_size, WindowAPI, load_html, start_asset_server,
+                    disable_window_backdrop)
+import live2d_assets
 
 
 def main():
@@ -32,8 +34,23 @@ def main():
         print("[airi-desktop] pywebview not installed. Run: pip install pywebview")
         sys.exit(1)
 
-    html = load_html(port)
-    html_url = create_temp_html(html, 'airi_pet_ui.html')
+    l2d_ok, l2d_detail = live2d_assets.check_assets()
+    for ln in l2d_detail:
+        print(f'[airi-live2d] {ln}')
+    print(f'[airi-live2d] live2d {"ENABLED" if l2d_ok else "disabled (image fallback)"}')
+
+    # 真透明分两件事：画面靠关掉 DWM 的 Mica 背景（系统深色模式下 pywebview 会装），
+    # 鼠标点穿靠 SetWindowRgn。详见 common.py 里的长注释。
+    sil = live2d_assets.silhouette_enabled()
+    print(f'[airi-live2d] silhouette {"ON" if sil else "OFF"}')
+    card = live2d_assets.card_mode()
+    print(f'[airi-live2d] character card {card}')
+
+    html = load_html(port, live2d=l2d_ok, silhouette=sil, card=card)
+    page_url, _asset_port = start_asset_server(html)
+    if page_url is None:
+        print('[airi-desktop] ERROR: cannot start asset server, exit.')
+        sys.exit(1)
 
     screen_w, screen_h = get_screen_size()
 
@@ -42,10 +59,12 @@ def main():
     y = screen_h - win_h - 120
 
     api = WindowAPI()
+    # 点击互动只在 standalone.py（当前入口）接线；这里是旧入口，保持最小改动
+    api.set_region_enabled(sil)
 
     window = webview.create_window(
         title='Airi',
-        url=html_url,
+        url=page_url,
         width=win_w,
         height=win_h,
         x=x,
@@ -60,7 +79,19 @@ def main():
 
     api.set_window(window)
 
-    webview.start(debug=False)
+    def _after_window_ready():
+        """窗口建出来后关掉 DWM 的 Mica 背景（不关的话是整块实心色）。"""
+        import time
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            ok, detail = disable_window_backdrop(window)
+            if ok:
+                print(f'[airi-dwm] Mica backdrop disabled ({detail})')
+                return
+            time.sleep(0.25)
+        print('[airi-dwm] WARNING: 没能关掉 Mica backdrop')
+
+    webview.start(_after_window_ready, debug=False)
 
 
 if __name__ == '__main__':
