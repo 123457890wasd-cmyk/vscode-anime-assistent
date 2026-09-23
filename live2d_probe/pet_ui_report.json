@@ -3,14 +3,14 @@
   "charImgHidden": true,
   "cssHidden": true,
   "canvas": "320x420",
-  "opaque": 40014,
-  "ratio": 0.2977,
+  "opaque": 39813,
+  "ratio": 0.2962,
   "anim": {
-    "changedPixels": 18967,
+    "changedPixels": 18742,
     "sampled": true
   },
   "blink": {
-    "samples": 1281,
+    "samples": 1285,
     "min": 1,
     "max": 1,
     "last": 1,
@@ -30,11 +30,11 @@
     "eyeR": 22
   },
   "status": "done",
-  "elapsedMs": 10242,
-  "saveCalls": 1367,
+  "elapsedMs": 10185,
+  "saveCalls": 1372,
   "postMin": 0,
   "postMax": 1,
-  "blinkFrames": 64,
+  "blinkFrames": 91,
   "blinkCycles": 2,
   "beforeFirst": 1
 }
