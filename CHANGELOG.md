@@ -1,6 +1,25 @@
 # Change Log
 
-## [0.3.5] — 2026-09-23（未发布）
+## [0.3.6] — 2026-09-23
+
+> 用户报："报错还在，看不到前端界面"。
+
+### Fixed
+- **region 全军覆没的致命笔误**（v0.3.5 引入）：`CreateRectRgn` /
+  `CreateRoundRectRgn` / `CreatePolygonRgn` 是 **gdi32.dll** 的导出，
+  v0.3.5 错写成 `user32.CreateRectRgn` —— `py_compile` 查不出，
+  运行时每次形状上报都抛 `AttributeError`，窗口 region 一次都没应用过
+  （表现：窗口黑块 / region 不生效）。`probe_region8.py` 直调验证 PASS。
+- **preLaunchTask** 从常驻 `npm: watch` 换成一次性 `npm: compile`：
+  `tsc` CLI 实测零错误，"任务检测到错误"弹窗与 16 条 IDE 报错都是
+  BOM 时代的缓存残留；一次性编译让 F5 变成确定性流程。
+- region 异常日志现在带完整 traceback（`region #N EXCEPTION` 多行）。
+
+### 注
+- 截至本轮，`live2d_probe` 探针环境里 pywebview 透明模式的 JS 桥仍无法
+  注入（与产品代码无关），桥上链路的最终确认依赖用户真机。
+
+## [0.3.5] — 2026-09-23
 
 > 用户报："黑边又回来了"。第六轮的"最小 pad + 细黑边"是过渡方案，
 > 本轮把黑边**彻底**消灭：region 与页面绘制**同形状**，且页面全部不透明。
