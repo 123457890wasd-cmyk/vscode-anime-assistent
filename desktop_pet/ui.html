@@ -26,6 +26,15 @@
       font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
       color: var(--text);
       user-select: none; -webkit-user-select: none;
+      /* 透明窗口上必须显式关掉次像素（ClearType）抗锯齿。
+         次像素渲染要求底是不透明的；页面底是透明的时候，Chromium 会把这块
+         文字的栅格化缓冲区按不透明处理 —— 表现就是**文字背后出现一块与文字同宽
+         的浅色方块**（用户在 WebView2 里看到的"块状白色"）。
+         关掉之后走灰度抗锯齿，字形边缘会稍微软一点点，换掉那块方块很值。
+         ⚠️ headless Chrome 本来就禁用次像素抗锯齿，所以这条在探针里看不出差别，
+         只能在真实 WebView2 上验证。 */
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
     body {
       display: flex;
@@ -50,7 +59,11 @@
       background:
         linear-gradient(var(--bubble-bg), var(--bubble-bg)) padding-box,
         linear-gradient(135deg, rgba(255,107,157,0.55), rgba(192,132,252,0.35), rgba(255,107,157,0.2)) border-box;
-      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      /* ⚠️ 这里曾经有一行 backdrop-filter: blur(10px)。
+         在**透明窗口**上它是有害的：backdrop-filter 要找"背后有什么"来做模糊，
+         而窗口背后是桌面、不在这张合成图里 —— Chromium 会退化成给这层糊一块
+         不透明的底，用户看到的就是对话框后面多一块浅色方块。
+         气泡本身已经是 92% 不透明，这层模糊既看不出效果、又制造问题，故删除。 */
       font-size: 12px; line-height: 1.55;
       white-space: pre-wrap; word-break: break-word;
       text-align: center;
@@ -90,8 +103,10 @@
     .bubble.error::after { border-top-color: rgba(255, 71, 87, 0.55); }
     .bubble.old {
       opacity: 0.45; transform: scale(0.92);
-      filter: saturate(0.6);
       transition: all 0.5s ease;
+      /* 这里原本还有 filter: saturate(0.6)。filter 会把元素提升成独立合成层，
+         透明窗口上这类层有可能连底一起被栅格化成不透明 —— 为了不冒这个险删掉，
+         降饱和的效果本来就被 opacity:0.45 盖过了，看不出来。 */
     }
     .bubble.fade-out {
       opacity: 0; transform: translateY(-8px) scale(0.85);
@@ -139,6 +154,33 @@
       75% { transform: translateY(-2px) rotate(-0.5deg); }
     }
 
+    /* ===== 角色底板（把"块状白"拢成一张干净的卡）=====
+       这个模型自带不少纯白美术：白色蕾丝女仆头饰、白色书桌板、巴菲上的奶油。
+       窗口真透明之后，这些白在深色桌面上散成好几块碎白，看起来像渲染坏了。
+       垫一张紧贴角色**实测外接框**的卡，碎白就并进同一张卡里，边界消失。
+       - 位置/大小由 JS 按 canvas 的 alpha 实测给出（"最小"=实测框+内边距，
+         不是写死 .character-box 的 160x210 —— 那比角色本身大一圈）
+       - position: fixed + z-index:0：必须落在 canvas(z-index:1) 之下，
+         否则会把角色盖住；fixed 让 bbox 可以直接用视口坐标，无需换算
+       - pointer-events:none：不能吃掉拖拽窗口的手势
+       - 只在 Live2D 就绪后由 JS 加 body.card-on 才显示；图片/CSS 兜底角色
+         时不显示（那时 z-index:0 会盖住 #charImg，反而更糟） */
+    .character-card {
+      display: none;
+      position: fixed; z-index: 0;
+      border-radius: 18px;
+      background: #fdfdff;
+      box-shadow: 0 6px 22px rgba(0, 0, 0, 0.38);
+      pointer-events: none;
+    }
+    body.card-on .character-card { display: block; }
+    /* 变体：只描一圈白框，卡内照旧透出桌面 */
+    body.card-frame .character-card {
+      background: transparent;
+      border: 1.5px solid rgba(255, 255, 255, 0.85);
+      box-shadow: 0 0 14px rgba(255, 255, 255, 0.28);
+    }
+
     /* 地面阴影 */
     .ground-shadow {
       width: 90px; height: 14px;
@@ -159,6 +201,7 @@
       border-radius: 50%;
       background: var(--accent);
       opacity: 0; pointer-events: none;
+      z-index: 3;   /* 浮在 Live2D 舞台之上 */
       animation: twinkle 3.5s infinite ease-in-out;
     }
     .sparkle:nth-child(1) { left: 18px; top: 60px; animation-delay: 0s; }
@@ -177,6 +220,22 @@
       pointer-events: none;
       filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3));
     }
+
+    /* ===== Live2D 舞台 =====
+       绝对定位铺满角色容器。z-index 1 让氛围粒子（z-index 3）仍然浮在角色之上，
+       跟原来「定位元素覆盖静态元素」的视觉关系保持一致。
+       pointer-events:none 是关键：鼠标事件必须穿透到 .character-wrapper，
+       否则 Live2D 的 canvas 会把拖拽窗口的手势吃掉。 */
+    .live2d-stage {
+      display: none;
+      position: absolute; inset: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+    .live2d-stage.visible { display: block; }
+    .live2d-stage canvas { display: block; }
+    /* Live2D 模型自带呼吸与摆动，再叠加 CSS 的 idleSway 会变成双重晃动 */
+    .character-box.live2d-active { animation: none; }
 
     /* ===== CSS 默认角色 ===== */
     .css-character { display: none; position: relative; width: 100%; height: 100%; }
@@ -374,7 +433,11 @@
       background: linear-gradient(135deg, #ff6b9d 20%, #c084fc 80%);
       -webkit-background-clip: text; background-clip: text;
       color: transparent;
-      filter: drop-shadow(0 0 8px var(--accent-glow));
+      /* ⚠️ 这里曾经有一行 filter: drop-shadow(0 0 8px var(--accent-glow))。
+         filter 会把元素提升成独立的合成层；在透明窗口上这一层的底如果没被
+         正确清成透明，就会变成一块与文字同宽的浅色方块（就是用户截图里
+         "Airi / online" 背后那一块）。
+         那个 glow 只有 45% 透明度的粉光，肉眼几乎看不出，删掉零损失。 */
     }
     .pet-status {
       font-size: 10px; color: var(--muted);
@@ -404,7 +467,7 @@
     .context-menu {
       position: fixed;
       background: rgba(22, 24, 40, 0.97);
-      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      /* 同 .bubble：透明窗口上 backdrop-filter 会糊出一块不透明的底 */
       border: 1px solid rgba(255,107,157,0.25);
       border-radius: 10px; padding: 5px;
       min-width: 120px; z-index: 999;
@@ -443,6 +506,9 @@
 </head>
 <body>
 
+  <!-- 角色底板：垫在角色与名字底下的一张白卡（位置由 JS 实测，见 .character-card） -->
+  <div class="character-card" id="charCard"></div>
+
   <!-- 气泡展示区 -->
   <div class="bubble-area" id="bubbleArea"></div>
 
@@ -454,6 +520,8 @@
       <span class="sparkle"></span>
       <span class="sparkle"></span>
       <span class="sparkle"></span>
+      <!-- Live2D 舞台（素材可用时接管角色位；失败则退回下面的图片/CSS 角色） -->
+      <div class="live2d-stage" id="live2dStage"></div>
       <!-- 自定义图片（优先级最高） -->
       <img id="charImg" src="" alt="Airi" style="display:none" />
       <!-- CSS 默认角色 -->
@@ -487,14 +555,26 @@
   <script>
     var PORT = {{PORT}};
     var CHAR_IMG = "{{CHARACTER_IMAGE}}";
+    var LIVE2D_ENABLED = {{LIVE2D_ENABLED}};
+    // 用字符串比较而不是裸插值：万一这个模板标记没被 load_html 替换掉，
+    // 裸插值会变成语法错误让整个页面挂掉，这样写只会安静地退化成 false。
+    var SILHOUETTE = ("{{SILHOUETTE}}" === "true");
+    // 角色底板模式：off / tight（紧贴角色的圆角卡）/ square（方卡）/ frame（只描白框）
+    //             / all（连名牌一起包进同一张卡）
+    var CHAR_CARD = "{{CHAR_CARD}}";
+    if (["off", "tight", "square", "frame", "all"].indexOf(CHAR_CARD) < 0) {
+      CHAR_CARD = "square";   // 与 live2d_assets.card_mode() 的默认值保持一致
+    }
     var SSE_URL = 'http://127.0.0.1:' + PORT + '/events';
     var EVENT_URL = 'http://127.0.0.1:' + PORT + '/event';
 
     // DOM
     var bubbleArea = document.getElementById('bubbleArea');
     var charBox = document.getElementById('charBox');
+    var charCard = document.getElementById('charCard');
     var charImg = document.getElementById('charImg');
     var cssChar = document.getElementById('cssChar');
+    var live2dStage = document.getElementById('live2dStage');
     var dotEl = document.getElementById('dot');
     var statusLabel = document.getElementById('statusLabel');
     var petArea = document.getElementById('petArea');
@@ -510,8 +590,13 @@
         currentEmotion = emotion;
         charBox.setAttribute('data-emotion', emotion);
 
+        // Live2D 接管时情绪交给模型表情。
+        // 注意：这时候绝不能再走下面的图片分支 —— 那张不透明的 PNG 会从模型的
+        // 透明区域透出来，看起来就是"两个角色叠在一起"。
+        applyLive2DEmotion(emotion);
+
         // 尝试加载情绪对应图片
-        if (CHAR_IMG && CHAR_IMG.length > 0) {
+        if (!live2d.ready && CHAR_IMG && CHAR_IMG.length > 0) {
           var base = CHAR_IMG.replace(/(\.\w+)$/, '_' + emotion + '$1');
           var testImg = new Image();
           testImg.onload = function() {
@@ -534,13 +619,17 @@
       emotionTimer = setTimeout(function() {
         currentEmotion = 'idle';
         charBox.setAttribute('data-emotion', 'idle');
+        applyLive2DEmotion('idle');
         // 立绘也要切回默认图，否则会一直停留在情绪变体
-        if (CHAR_IMG && CHAR_IMG.length > 0) charImg.src = CHAR_IMG;
+        if (!live2d.ready && CHAR_IMG && CHAR_IMG.length > 0) charImg.src = CHAR_IMG;
       }, 8000);
     }
 
     // ============ 自定义图片加载 ============
-    if (CHAR_IMG && CHAR_IMG.length > 0) {
+    // 抽成函数：LIVE2D_ENABLED 时先不显示图片，等 Live2D 的结果再决定用哪个，
+    // 免得先闪一下旧立绘、再被模型替换掉。
+    function showImageCharacter() {
+      if (!CHAR_IMG || CHAR_IMG.length === 0) return;
       charImg.onerror = function() {
         charImg.style.display = 'none';
         cssChar.classList.add('visible');
@@ -550,12 +639,196 @@
       cssChar.classList.remove('visible');
     }
 
+    // ============ Live2D 角色 ============
+    // 素材缺失（LIVE2D_ENABLED=false）或任何一步失败 → 静默退回图片 / CSS 角色。
+    // 外观只是外观，绝不该让桌宠起不来。
+    //
+    // 素材由 common.py 的本地静态服务器提供，与页面同源；走 file:// 的话
+    // model3.json 引用的几十个文件会被 CORS 全部拦掉（实测）。
+    var LIVE2D_MODEL_URL = '/pet-assets/ds-whale-girl/c_0120.model3.json';
+    var live2d = { ready: false, failed: false, model: null, app: null };
+
+    // 现有情绪 → 模型表情名。这个模型有 44 个表情，按 model3.json 里的中文 Name 匹配。
+    // 引擎一次只挂一个表情，所以"开心兴奋 + 星星眼"这种组合取其中更能表达情绪的那个。
+    var EMOTION_EXPRESSION = {
+      idle: null,                 // 不戴表情，回到待机
+      greeting: '开心兴奋',
+      angry: '生气',
+      happy: '星星眼',
+      surprised: '感叹号'
+    };
+
+    function applyLive2DEmotion(emotion) {
+      if (!live2d || !live2d.ready || !live2d.model) return;
+      var name = EMOTION_EXPRESSION[emotion];
+      try {
+        if (name) {
+          live2d.model.expression(name);
+        } else {
+          var em = live2d.model.internalModel.motionManager.expressionManager;
+          if (em && typeof em.resetExpression === 'function') em.resetExpression();
+          else live2d.model.expression();
+        }
+      } catch (err) { /* 表情失败不影响角色本身 */ }
+    }
+
+    // ---- 眨眼驱动 ----
+    // 引擎自带的 eyeBlink 在这个模型上永远不会跑：它被
+    //   motionUpdated || this.eyeBlink?.updateParameters?.(...)
+    // 这个条件挡着，而本模型 8 个动作全是 Loop:true、idle 几乎每帧都在驱动参数，
+    // 于是 motionUpdated 恒为真 —— 结果就是角色从不眨眼。
+    //
+    // 做法照抄 dsh-pet-live2d 的参考实现：加载时 eyeBlink:false，
+    // 自己在 saveParameters() 之后那一帧写入。两个要点：
+    //   1. 必须挂在 saveParameters 之后 —— 挂早了会被引擎自己的快照吃进基线，
+    //      下一帧再叠一次，眼睛就永远睁不开了。
+    //   2. 必须是 **乘** 而不是赋值 —— 表情可能已经把眼睛眯起来了，
+    //      眨眼要能闭上"当前这个"眼睛，而不是把它强行撑开成 0。
+    var BLINK_CLOSE_MS = 70, BLINK_HOLD_MS = 45, BLINK_OPEN_MS = 110;
+    var BLINK_MIN_MS = 2200, BLINK_MAX_MS = 6400;
+    var blinkAt = 0, blinkStart = 0;
+
+    function installBlinkDriver(core) {
+      if (!core || typeof core.saveParameters !== 'function') return;
+      var idxL = -1, idxR = -1;
+      try {
+        // 按名字查参数只能走 _model.parameters.ids（字符串数组）；
+        // 引擎包装层的 getParameterIndex(string) 传字符串永远 miss。
+        var ids = Array.from(core._model.parameters.ids);
+        idxL = ids.indexOf('ParamEyeLOpen');
+        idxR = ids.indexOf('ParamEyeROpen');
+      } catch (err) { return; }
+      if (idxL < 0 || idxR < 0) return;
+
+      var base = core.saveParameters.bind(core);
+      var nextBlink = function(now) {
+        return now + BLINK_MIN_MS + Math.random() * (BLINK_MAX_MS - BLINK_MIN_MS);
+      };
+
+      core.saveParameters = function() {
+        base();
+        try {
+          var values = core._model.parameters.values;
+          var now = performance.now();
+          if (blinkAt === 0) blinkAt = nextBlink(now);
+          if (blinkStart === 0 && now >= blinkAt) blinkStart = now;
+          if (blinkStart === 0) return;
+
+          var elapsed = now - blinkStart;
+          var shut = BLINK_CLOSE_MS + BLINK_HOLD_MS;
+          var open = 1;
+          if (elapsed < BLINK_CLOSE_MS) open = 1 - elapsed / BLINK_CLOSE_MS;
+          else if (elapsed < shut) open = 0;
+          else if (elapsed < shut + BLINK_OPEN_MS) open = (elapsed - shut) / BLINK_OPEN_MS;
+          else { blinkStart = 0; blinkAt = nextBlink(now); }
+
+          if (open < 1) {
+            // 眼睛已经全闭上了就别再乘（否则会跟"wink"之类的表情打架）
+            if (values[idxL] > 0.2) values[idxL] *= open;
+            if (values[idxR] > 0.2) values[idxR] *= open;
+          }
+        } catch (err) { /* 模型已销毁 */ }
+      };
+    }
+
+    // ---- 加载 ----
+    function injectScript(src) {
+      return new Promise(function(resolve, reject) {
+        var tag = document.createElement('script');
+        tag.src = src; tag.async = false;
+        tag.onload = function() { resolve(); };
+        tag.onerror = function() { reject(new Error('script failed: ' + src)); };
+        document.head.appendChild(tag);
+      });
+    }
+
+    async function initLive2D() {
+      if (!LIVE2D_ENABLED) { showImageCharacter(); return; }
+      try {
+        await injectScript('/vendor/live2dcubismcore.min.js');
+        if (typeof window.Live2DCubismCore === 'undefined') throw new Error('Live2DCubismCore missing');
+        await injectScript('/vendor/live2d-vendor.js');
+        var vendor = window.__dshLive2dPetVendor;
+        if (!vendor) throw new Error('renderer bundle missing');
+        vendor.extensions.add(vendor.Live2DPlugin);
+        vendor.configureCubismSDK({ memorySizeMB: 64 });
+
+        // 用 clientWidth/Height 量尺寸而不是 getBoundingClientRect：
+        // .character-box 上有 idleSway 的 rotate 动画，rect 会把旋转后的
+        // 包围盒算进来，宽高各偏约 2px。clientWidth 不受 transform 影响。
+        var W = Math.max(1, charBox.clientWidth);
+        var H = Math.max(1, charBox.clientHeight);
+
+        var app = new vendor.Application();
+        await app.init({
+          width: W, height: H,
+          backgroundAlpha: 0,
+          antialias: true,
+          autoDensity: false,
+          resolution: Math.max(2, window.devicePixelRatio || 1),
+          preference: 'webgl',
+          preserveDrawingBuffer: true
+        });
+        app.canvas.style.width = '100%';
+        app.canvas.style.height = '100%';
+        live2dStage.appendChild(app.canvas);
+
+        var model = await vendor.Live2DModel.from(LIVE2D_MODEL_URL, {
+          autoUpdate: true,
+          autoHitTest: false,
+          autoFocus: false,
+          eyeBlink: false,          // 见上面的眨眼说明
+          textureOptions: { lod: 'full' }
+        });
+        var intr = model.internalModel;
+        var srcW = Math.max(1, (intr && intr.originalWidth) || model.width);
+        var srcH = Math.max(1, (intr && intr.originalHeight) || model.height);
+
+        app.stage.addChild(model);
+        model.anchor.set(0.5, 0.5);
+        model.scale.set(Math.min(W / srcW, H / srcH));
+        model.position.set(W / 2, H / 2);
+
+        installBlinkDriver(intr && intr.coreModel);
+
+        live2d.model = model;
+        live2d.app = app;
+        live2d.ready = true;
+
+        // 接管角色位
+        charImg.style.display = 'none';
+        cssChar.classList.remove('visible');
+        charBox.classList.add('live2d-active');
+        live2dStage.classList.add('visible');
+
+        await model.motion('Idle', 0, vendor.MotionPriority.IDLE);
+        applyLive2DEmotion(currentEmotion);
+
+        // 诊断钩子：让自动化测试能读到真实状态（对齐 dsh 参考实现的
+        // window.__dshLive2dPet，那边也是这么暴露的）。正常使用不依赖它。
+        window.__airi = {
+          live2d: live2d,
+          currentEmotion: function() { return currentEmotion; }
+        };
+      } catch (err) {
+        live2d.failed = true;
+        if (window.console && console.warn) {
+          console.warn('[airi] Live2D unavailable, falling back to image character:', err);
+        }
+        showImageCharacter();
+      }
+    }
+
     // ============ 气泡逻辑 ============
     function removeBubble(el) {
       if (el.dataset.removing) return;
       el.dataset.removing = '1';
       el.classList.add('fade-out');
-      setTimeout(function() { el.remove(); }, 450);
+      setTimeout(function() {
+        el.remove();
+        // 气泡消失后窗口形状也得跟着收，否则原地会留一块空矩形
+        if (typeof pushSilhouette === 'function') setTimeout(function() { pushSilhouette(true); }, 0);
+      }, 450);
     }
 
     function pruneBubbles() {
@@ -592,6 +865,10 @@
       charBox.style.animation = 'none';
       charBox.offsetHeight;
       charBox.style.animation = 'idleSway 4s infinite ease-in-out';
+      // 气泡一出现就得进窗口形状，否则要等下一次轮询 —— 那一瞬间气泡会被 region 裁掉。
+      // 必须显式传 true：setTimeout(fn, 0) 按规范是**不带参数**调用的，
+      // 写成 setTimeout(pushSilhouette, 0) 并不会把 force 传成真值。
+      if (typeof pushSilhouette === 'function') setTimeout(function() { pushSilhouette(true); }, 0);
     }
 
     function setOnline(online) {
@@ -623,12 +900,18 @@
       return es;
     }
 
-    // ============ 拖拽移动 ============
+    // ============ 拖拽移动 + 点击互动 ============
+    // 两者共用同一次 mousedown：拖拽是"按下并移动"，点击是"按下后原地松开"。
+    // 不区分的话，每次想把窗口拖走都会顺手触发一次点击台词。
     var dragging = false, dragStartX = 0, dragStartY = 0, winStartX = 0, winStartY = 0;
+    var downX = 0, downY = 0, moved = false;
+    var CLICK_SLOP = 5;   // 移动不超过这个像素数才算"点击"
 
     petArea.addEventListener('mousedown', function(e) {
       if (e.button !== 0) return;
       dragging = true;
+      moved = false;
+      downX = e.clientX; downY = e.clientY;
       dragStartX = e.screenX; dragStartY = e.screenY;
       winStartX = window.screenX || 0; winStartY = window.screenY || 0;
       if (window.pywebview && window.pywebview.api) {
@@ -644,6 +927,8 @@
 
     document.addEventListener('mousemove', function(e) {
       if (!dragging) return;
+      if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > CLICK_SLOP) moved = true;
+      if (!moved) return;      // 还没越过阈值就别急着挪窗口
       try {
         if (window.pywebview && window.pywebview.api)
           window.pywebview.api.move_window(winStartX + e.screenX - dragStartX, winStartY + e.screenY - dragStartY);
@@ -651,7 +936,414 @@
       e.preventDefault();
     });
 
-    document.addEventListener('mouseup', function() { dragging = false; });
+    document.addEventListener('mouseup', function(e) {
+      if (dragging && !moved) handlePetClick(e);
+      dragging = false;
+    });
+
+    // ---- 命中判定：读 canvas 的 alpha ----
+    // 这个模型没有声明 Cubism HitAreas，引擎的 hitTest() 用不了，
+    // 所以直接问 WebGL：这个点上的像素到底是不是角色。
+    // 能这么做的前提是 app.init 时开了 preserveDrawingBuffer —— 关掉的话
+    // readPixels 只会读到一片空白。
+    function alphaAt(clientX, clientY) {
+      if (!live2d.ready || !live2d.app) return 0;
+      var canvas = live2d.app.canvas;
+      var rect = canvas.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return 0;
+      if (clientX < rect.left || clientX >= rect.right ||
+          clientY < rect.top || clientY >= rect.bottom) return 0;
+
+      // 与 characterRects() 走**同一条**读取路径，读的是同一份采样结论。
+      // 以前这里是自己单点 readPixels：如果那个环境的默认帧缓冲没有真 alpha
+      // （WebView2 windowed hosting 下有可能），它会恒返回 255 ——
+      // 于是"点哪儿都算点到角色"。轮廓和命中必须用同一个可信来源。
+      var grid = readAlphaGrid(silAlphaMode === '2d' || silAlphaMode === 'off' ? '2d' : 'gl');
+      if (!grid) return 0;
+      var gx = Math.min(grid.w - 1,
+                        Math.max(0, Math.round((clientX - rect.left) / rect.width * grid.w)));
+      // WebGL 的 y 轴朝上，DOM 的朝下，这里要翻
+      var gy = Math.min(grid.h - 1,
+                        Math.max(0, Math.round((1 - (clientY - rect.top) / rect.height) * grid.h)));
+      return grid.buf[(gy * grid.w + gx) * 4 + 3];
+    }
+
+    // 点击落在角色的哪一段。Q 版坐姿：上面是头，中间是身体，下面是她趴着的桌面。
+    function zoneAt(clientY) {
+      if (!live2d.ready || !live2d.app) return 'body';
+      var rect = live2d.app.canvas.getBoundingClientRect();
+      var ry = rect.height > 0 ? (clientY - rect.top) / rect.height : 0.5;
+      if (ry < 0.45) return 'head';
+      if (ry < 0.85) return 'body';
+      return 'desk';
+    }
+
+    var clickBusy = false;
+
+    function handlePetClick(e) {
+      if (clickBusy) return;
+      // 点到透明处 = 没点到角色，安静地什么都不做
+      if (alphaAt(e.clientX, e.clientY) < 24) return;
+      var api = window.pywebview && window.pywebview.api;
+      if (!api || !api.pet_click) return;
+      clickBusy = true;
+      setTimeout(function() { clickBusy = false; }, 600);   // 防手抖连点
+      try {
+        Promise.resolve(api.pet_click(zoneAt(e.clientY))).then(function(res) {
+          if (!res || !res.text) return;
+          showBubble(res.text, false);
+          if (res.emotion) setEmotion(res.emotion);
+        }, function() {});
+      } catch (err) {}
+    }
+
+    // ============ 异形窗口：把「角色轮廓 + 气泡 + 名字」的形状交给 Python ============
+    // 为什么算在页面这边：只有页面知道角色实际画在哪儿（canvas 的 alpha 通道），
+    // 也只有页面知道气泡的实时位置和高度。
+    // Python 侧只负责把这个形状设成窗口 region —— 背景那一大块由此真正透出桌面。
+    var SIL_INTERVAL = 500;      // ms
+    var SIL_ALPHA_MIN = 32;      // 低于它算背景
+    var SIL_COVERAGE_MAX = 0.70; // 角色像素占画布比例的上限
+    // 阈值宁可选高：region 比角色大 -> 露出宿主 Form 的底色（很显眼）；
+    // 比角色小 -> 只是边缘收细一点，根本看不出来。
+    //
+    // 上面这条 SIL_COVERAGE_MAX 是**判据**不是调参：角色绝不可能占满画布
+    // 七成。一旦读数超过它，就说明这个环境的 alpha 根本不可信
+    // （WebView2 windowed hosting 下 WebGL 默认帧缓冲可能被强制成不透明，
+    //  readPixels 全 255 -> 整张画布都算"角色" -> region 等于整窗，
+    //  用户看到的就是"完全没透明"）。这时必须换一条路径复核，
+    //  绝不能把那个满画布的结果直接设成窗口形状。
+    var silLastKey = '';
+    var silDiagSent = 0;         // 诊断上报条数上限，别把日志刷爆
+    var silFails = 0;
+    var silNextAt = 0;           // 连续失败后退避，但**永不放弃**
+    var silAlphaMode = 'gl';     // 实测哪些读取路径可信：'gl' / '2d' / 'off'
+                                 // alphaAt()（点击命中）复用这个结论，两者必须一致，
+                                 // 否则会出现"轮廓对但点哪儿都说话"或反过来的错配。
+
+    function collectUiRects() {
+      var out = [];
+      var pairs = [];
+      var bubbles = bubbleArea.querySelectorAll('.bubble');
+      for (var i = 0; i < bubbles.length; i++) pairs.push([bubbles[i], 5]);
+      var nm = document.querySelector('.pet-name');
+      var st = document.querySelector('.pet-status');
+      if (nm) pairs.push([nm, 3]);
+      if (st) pairs.push([st, 3]);
+      // 角色底板是一张**实心卡**，必须并进窗口形状 —— 否则它会被 region 裁掉，
+      // 表现成"卡只显示一部分"的怪样子。它已经是纯矩形，不用再加内边距。
+      if (charCard && document.body.classList.contains('card-on')) {
+        pairs.push([charCard, 0]);
+      }
+      for (var j = 0; j < pairs.length; j++) {
+        var r = pairs[j][0].getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) continue;
+        var pad = pairs[j][1];
+        out.push([r.left - pad, r.top - pad, r.right + pad, r.bottom + pad]);
+      }
+      return out;
+    }
+
+    // ============ 角色底板 ============
+    // 把角色的实测外接框（来自 canvas 的 alpha 扫描）变成一张卡的位置和大小。
+    // "最小" 就体现在这里：卡跟着角色真实画出来的范围走，不是 .character-box
+    // 那个写死的 160x210（那比角色本身大一圈，白边会很显眼）。
+    var CARD_PAD = 10;    // 外接框再放一圈，别把抗锯齿边缘切掉
+    var CARD_PAD_ALL = 14;  // 连名牌一起包时留宽一点，文字别贴着卡边
+    var CARD_SAMPLES = 6; // 前 6 次取样（约 3 秒）取并集后**锁定**，见下面的说明
+    var cardUnion = null;
+    var cardSamples = 0;
+
+    function updateCharCard(rects) {
+      if (CHAR_CARD === 'off' || !charCard || !rects || !rects.length) return;
+      if (cardSamples >= CARD_SAMPLES) return;   // 已锁定：卡不动了
+
+      var u = cardUnion;
+      for (var i = 0; i < rects.length; i++) {
+        var r = rects[i];
+        if (!u) u = cardUnion = [r[0], r[1], r[2], r[3]];
+        if (r[0] < u[0]) u[0] = r[0];
+        if (r[1] < u[1]) u[1] = r[1];
+        if (r[2] > u[2]) u[2] = r[2];
+        if (r[3] > u[3]) u[3] = r[3];
+      }
+      if (!u) return;
+      // === 'all'：把名牌/状态也包进同一张卡 ===
+      // 为什么需要这个模式：用户截图里名牌（Airi / online）背后也有一块浅色方块。
+      // 它的成因在 headless Chrome 里复现不出来（Chrome 完全不画那块），所以我
+      // 没法保证一定修掉。把它们并进一张白卡之后，**即使那块还在也看不见了** ——
+      // 白底上的白块等于不存在。属于"用设计把不确定性兜住"。
+      if (CHAR_CARD === 'all') {
+        var extra = [document.querySelector('.pet-name'),
+                     document.querySelector('.pet-status')];
+        for (var k = 0; k < extra.length; k++) {
+          if (!extra[k]) continue;
+          var er = extra[k].getBoundingClientRect();
+          if (er.width < 1 || er.height < 1) continue;
+          if (er.left < u[0]) u[0] = er.left;
+          if (er.top < u[1]) u[1] = er.top;
+          if (er.right > u[2]) u[2] = er.right;
+          if (er.bottom > u[3]) u[3] = er.bottom;
+        }
+      }
+      // ⚠️ 为什么要取并集再锁定，而不是每次跟着角色走：
+      // 模型一直在做 idle 动作（呼吸/微摆），外接框每次都会差几个像素。
+      // 卡跟着变 = 每 500ms 抖一下，比白边本身难看得多。
+      // 先采几次取并集（= 把摆动范围整个包住），然后焊死。
+      cardSamples++;
+      if (cardSamples < CARD_SAMPLES) return;
+
+      var vw = document.documentElement.clientWidth || window.innerWidth || 0;
+      var vh = document.documentElement.clientHeight || window.innerHeight || 0;
+      if (!vw || !vh) { cardSamples = CARD_SAMPLES - 1; return; }
+      if (!(u[2] > u[0]) || !(u[3] > u[1])) { cardSamples = CARD_SAMPLES - 1; return; }
+
+      var pad = (CHAR_CARD === 'all') ? CARD_PAD_ALL : CARD_PAD;
+      var w = (u[2] - u[0]) + pad * 2;
+      var h = (u[3] - u[1]) + pad * 2;
+      var cx = (u[0] + u[2]) / 2, cy = (u[1] + u[3]) / 2;
+      if (CHAR_CARD === 'square') {
+        var side = Math.max(w, h);
+        w = h = side;
+      }
+      // 夹进视口：卡片超出视口会被 region 切掉，看起来像缺了一块
+      w = Math.min(w, vw);
+      h = Math.min(h, vh);
+      var left = Math.round(Math.min(Math.max(cx - w / 2, 0), Math.max(vw - w, 0)));
+      var top = Math.round(Math.min(Math.max(cy - h / 2, 0), Math.max(vh - h, 0)));
+      w = Math.round(w);
+      h = Math.round(h);
+
+      charCard.style.left = left + 'px';
+      charCard.style.top = top + 'px';
+      charCard.style.width = w + 'px';
+      charCard.style.height = h + 'px';
+      if (CHAR_CARD === 'frame') document.body.classList.add('card-frame');
+      document.body.classList.add('card-on');
+
+      // 底板一出现，窗口形状里就多了一块 —— 必须立刻重推一次，
+      // 否则要等下一次轮询，那一瞬间卡会被 region 裁掉。
+      if (typeof pushSilhouette === 'function') {
+        setTimeout(function() { pushSilhouette(true); }, 0);
+      }
+    }
+
+    // 读 alpha 的两条独立路径。为什么要两条：
+    //   'gl'  = readPixels 主 framebuffer（常规做法，但依赖默认帧缓冲真的有 alpha 通道）
+    //   '2d'  = 把 canvas 画到 2D canvas 再 getImageData（走合成器那条路，机制完全不同）
+    // WebView2 的 windowed hosting 下，WebGL 默认帧缓冲有可能被强制成不透明，
+    // 这时 'gl' 会读出"整张画布都是角色"，而 '2d' 仍可能拿到真 alpha。
+    function readAlphaGrid(mode) {
+      var app = live2d.app;
+      if (!app) return null;
+      var canvas = app.canvas;
+      var w = canvas.width, h = canvas.height;
+      if (!w || !h) return null;
+
+      if (mode === 'gl') {
+        var gl = app.renderer && app.renderer.gl;
+        if (!gl) return null;
+        var buf = new Uint8Array(w * h * 4);
+        try {
+          // 必须绑到主 framebuffer 才读得到真正画出来的那一帧
+          var prev = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, prev);
+        } catch (err) { return null; }
+        return { buf: buf, w: w, h: h };
+      }
+
+      try {
+        var c2 = document.createElement('canvas');
+        c2.width = w; c2.height = h;
+        var g2 = c2.getContext('2d');
+        if (!g2) return null;
+        g2.clearRect(0, 0, w, h);
+        g2.drawImage(canvas, 0, 0, w, h);
+        var img = g2.getImageData(0, 0, w, h);
+        return { buf: img.data, w: w, h: h };
+      } catch (err) { return null; }
+    }
+
+    function mergeRuns(rows) {
+      // 相邻行的区间几乎重合就并成一个大矩形：矩形数能从几百降到几十，
+      // ExtCreateRegion 和每次重绘的开销都跟着降。
+      var merged = [];
+      for (var k = 0; k < rows.length; k++) {
+        var cur = rows[k];
+        var prev = merged.length ? merged[merged.length - 1] : null;
+        if (prev && Math.abs(prev[0] - cur[0]) <= 2 &&
+            Math.abs(prev[2] - cur[2]) <= 2 && prev[3] === cur[1]) {
+          if (cur[0] < prev[0]) prev[0] = cur[0];
+          if (cur[2] > prev[2]) prev[2] = cur[2];
+          prev[3] = cur[3];
+        } else {
+          merged.push(cur.slice());
+        }
+      }
+      return merged;
+    }
+
+    function scanAlpha(grid, rect) {
+      var buf = grid.buf, w = grid.w, h = grid.h;
+      var sx = rect.width / w, sy = rect.height / h;
+      // 每行约压到 2 个 CSS 像素高。行太厚，角色上下边缘会出现肉眼可见的阶梯。
+      var step = Math.max(1, Math.round(2 / Math.max(sy, 0.01)));
+      var rows = [];
+      var on = 0;
+      for (var y = h - 1; y >= 0; y -= step) {
+        var top = Math.round(rect.top + (h - 1 - y) * sy);
+        var bottom = Math.round(top + step * sy);
+        var base = y * w * 4;
+        var run = -1;
+        for (var x = 0; x <= w; x++) {
+          var a = (x < w) ? buf[base + x * 4 + 3] : 0;
+          if (a > SIL_ALPHA_MIN) {
+            on++;
+            if (run < 0) run = x;
+          } else if (run >= 0) {
+            rows.push([Math.round(rect.left + run * sx), top,
+                       Math.round(rect.left + x * sx), bottom]);
+            run = -1;
+          }
+        }
+      }
+      var sampled = Math.ceil(h / step) * w;
+      return { rects: mergeRuns(rows), coverage: sampled ? (on / sampled) : -1 };
+    }
+
+    // 返回 {rects, coverage, source}
+    //   source = 'gl' / '2d'        可信，可以用
+    //   source = 'unreliable'       读数不可信，**不要**拿它设窗口形状
+    //   source = 'none'             没有画布/没就绪
+    function characterRects() {
+      if (!live2d.ready || !live2d.app) return { rects: [], coverage: -1, source: 'none' };
+      var rect = live2d.app.canvas.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return { rects: [], coverage: -1, source: 'none' };
+
+      var g = readAlphaGrid('gl');
+      var r = g ? scanAlpha(g, rect) : { rects: [], coverage: -1 };
+      if (r.coverage >= 0 && r.coverage <= SIL_COVERAGE_MAX) {
+        silAlphaMode = 'gl';
+        return { rects: r.rects, coverage: r.coverage, source: 'gl' };
+      }
+      var g2 = readAlphaGrid('2d');
+      var r2 = g2 ? scanAlpha(g2, rect) : { rects: [], coverage: -1 };
+      if (r2.coverage >= 0 && r2.coverage <= SIL_COVERAGE_MAX) {
+        silAlphaMode = '2d';
+        return { rects: r2.rects, coverage: r2.coverage, source: '2d' };
+      }
+      // 两条路径都说"整张画布都是角色" -> 这个环境的 alpha 不可信。
+      // 宁可留着方块，也不能把整窗设成 region（那等于什么都没做）
+      // 更不能只推气泡矩形（那会把角色裁没）。
+      silAlphaMode = 'off';
+      return { rects: r2.rects.length ? r2.rects : r.rects,
+               coverage: Math.max(r.coverage, r2.coverage),
+               source: 'unreliable' };
+    }
+
+    // 把这一层的真实状态回报给宿主，写进 .airi-pet.log。
+    // 没有这条链路，"为什么没透明"在用户侧完全无从判断：不透明可能来自
+    // 轮廓算错、桥没通、句柄取不到、SetWindowRgn 失败，四层四种原因，
+    // 而它们以前全都是静默的。
+    function reportSil(stage, ch, res) {
+      if (silDiagSent >= 12) return;
+      silDiagSent++;
+      try {
+        var canvas = (live2d.app && live2d.app.canvas) || null;
+        var box = canvas ? canvas.getBoundingClientRect() : null;
+        fetch('/event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'silhouetteDiag',
+            payload: {
+              stage: stage,
+              source: ch ? ch.source : '-',
+              coverage: ch ? Math.round((ch.coverage || 0) * 10000) / 10000 : -1,
+              charRects: ch && ch.rects ? ch.rects.length : -1,
+              uiRects: collectUiRects().length,
+              vw: document.documentElement.clientWidth,
+              vh: document.documentElement.clientHeight,
+              inner: window.innerWidth + 'x' + window.innerHeight,
+              canvas: canvas ? (canvas.width + 'x' + canvas.height) : '-',
+              cssBox: box ? (Math.round(box.width) + 'x' + Math.round(box.height) +
+                             '@' + Math.round(box.left) + ',' + Math.round(box.top)) : '-',
+              dpr: window.devicePixelRatio || 1,
+              live2d: !!(window.__airi && window.__airi.live2d && window.__airi.live2d.ready),
+              host: res ? { ok: !!res.ok, why: res.why || '',
+                            rects: res.rects, meta: res.meta } : null
+            }
+          })
+        });
+      } catch (err) { /* 诊断失败绝不能影响主流程 */ }
+    }
+
+    function pushSilhouette(force) {
+      if (!live2d.ready) return;
+      // 连续失败后放慢重试，但**永不放弃** —— 模块加载顺序、窗口创建时机
+      // 都可能让前几次失败，永久放弃等于把这条路焊死。上一版就是 3 次即止。
+      if (!force && Date.now() < silNextAt) return;
+
+      var ch = characterRects();
+      // 底板先于窗口形状更新：collectUiRects() 得把卡的位置算进去。
+      // 读数不可信时不设底板 —— 那种情况下 rects 是整个画布，卡会撑成一整张白幕。
+      if (ch.source !== 'unreliable' && ch.rects.length) updateCharCard(ch.rects);
+
+      // 底板只跟"角色画在哪儿"有关。即使 SILHOUETTE=0（放弃异形窗口），
+      // 底板仍然要工作，所以这个 return 放在底板更新之后。
+      if (!SILHOUETTE) return;
+
+      var api = window.pywebview && window.pywebview.api;
+      if (!api || !api.set_window_region) { reportSil('no-api', null); return; }
+
+      if (ch.source === 'unreliable' || !ch.rects.length) {
+        // 安全阀：轮廓拿不到时**绝不能**只把气泡/名字推上去 ——
+        // 那会把窗口裁成一小条，角色直接消失。宁可暂时留着方块。
+        reportSil('silhouette-unusable', ch);
+        silNextAt = Date.now() + 5000;
+        return;
+      }
+
+      var vw = document.documentElement.clientWidth || window.innerWidth || 0;
+      var vh = document.documentElement.clientHeight || window.innerHeight || 0;
+      if (!vw || !vh) { reportSil('no-viewport', ch); return; }
+
+      var payload = { vw: vw, vh: vh, src: ch.source, rects: ch.rects.concat(collectUiRects()) };
+      var key = JSON.stringify(payload);
+      if (key === silLastKey) return;     // 形状没变就别打扰 Python
+      silLastKey = key;
+
+      Promise.resolve(api.set_window_region(payload)).then(function(res) {
+        if (res && res.ok) {
+          if (silFails) reportSil('recovered', ch, res);
+          silFails = 0; silNextAt = 0;
+          if (silDiagSent < 3) reportSil('applied', ch, res);
+        } else {
+          silFails++;
+          silNextAt = Date.now() + 5000;
+          reportSil('host-reject', ch, res);
+          // 失败时清掉 key，让下次能重发同一形状
+          silLastKey = '';
+        }
+      }, function(err) {
+        silFails++;
+        silNextAt = Date.now() + 5000;
+        silLastKey = '';
+        reportSil('bridge-error', ch, { why: String(err && err.message || err) });
+      });
+    }
+
+    function startSilhouetteLoop() {
+      // 只关掉异形窗口、但还想留角色底板时，循环照样要跑 ——
+      // 底板的位置也来自这条 readPixels 扫描，只是频率可以低一点（readPixels 不便宜）。
+      if (!SILHOUETTE && CHAR_CARD === 'off') return;
+      var iv = SILHOUETTE ? SIL_INTERVAL : 1200;
+      setInterval(pushSilhouette, iv);
+      setTimeout(function() { pushSilhouette(true); }, 900);  // 首帧：等 Live2D 真正画出第一帧
+      setTimeout(function() { pushSilhouette(true); }, 2500);
+    }
 
     // ============ 右键菜单 ============
     petArea.addEventListener('contextmenu', function(e) {
@@ -684,6 +1376,8 @@
 
     // ============ 启动 ============
     connectSSE();
+    initLive2D();
+    startSilhouetteLoop();
   </script>
 </body>
 </html>
