@@ -22,8 +22,8 @@
 | **桌宠本体 `ui.html` 端到端** | ✅ 7/7 断言通过（见下） |
 | **窗口真透明（关掉 DWM Mica 背景）** | ✅ 用户真实窗口上**屏幕实测**：0.00% → 90.49% 透出桌面（`live_fix4.txt`）。⚠️ **第五轮修正**：那 90% 里**很大一部分其实是 region 裁剪**（窗口被裁成 DOM 形状，形状之外露桌面）。真正让"页面没画的像素"变透明的是第五轮的 `AIRI_WIN_BG` —— `live_fix5.txt`：与桌面一致 **52.41% → 79.28%** |
 | **窗口形状（`SetWindowRgn`）** | ✅ 31/31 断言通过，`GetWindowRgn` 读回逐值相同。⚠️ **第五轮修正**：它**确实会裁画面**（形状之外露桌面），第三轮"画面不受它影响"那句只在"整窗被 Mica 盖住"的前提下成立；它同时负责鼠标点穿 |
-| **块状白（气泡/名牌背后那一圈方底）** | ✅ 第五轮定位到窗口层面并修掉：region 的 pad 环里露的是宿主 Form 默认底色 `#F0F0F0`。真窗口 A/B：名牌区域 `#F0F0F0` 像素 **21.07% → 0.00%**（`live_fix5.txt`、`_cmp5_名牌_off.png` vs `_cmp5_名牌_key.png`） |
-| **点击说话（alpha 命中 + 台词池）** | ✅ 26/26 断言通过（真 Chrome 合成事件，拖拽不误触发） |
+| **块状白（气泡/名牌背后那一圈方底）** | ✅ 第五轮定位到窗口层面（region 的 pad 环露宿主 Form 底色 `#F0F0F0`）。⚠️ **第六轮修正**：第五轮的颜色键挖洞（`TransparencyKey`）会把窗口打成 alpha=0 / 让 WebView2 内容整窗鼠标穿透（"看得见点不着"，即用户报的点击/拖拽回归）—— **颜色键路线整体弃用**。第六轮改为 `dark`（Form 底色压黑）+ pad 收窄到 1px + 气泡尾巴单独成矩形：细黑边替代块状白（`live_fix6.txt`、`winbg_fix6.txt`、`colorkey_test2.txt`） |
+| **点击说话（alpha 命中 + 台词池）** | ✅ 26/26 断言通过（真 Chrome 合成事件，拖拽不误触发）。第六轮起前端带黑匣子：`onerror`/`unhandledrejection` 上报 + 桥自检 ping，`[airi-js]` 日志可分辨页面崩 / 桥断 / 没命中 |
 
 Chromium 侧 5/5 断言全通过。WebView2 侧在本自动化会话里曾表现随机
 （同一份代码，`loaded` 事件有时触发有时不触发）——但那是我这边的**会话环境**问题，
@@ -627,6 +627,44 @@ pad 小于它就会被 region 裁掉。
 2. **`probe_live_fix5.py` 第一版只按 pid 找窗口，一个都没命中**（日志里明明有 hwnd）。
    改成"标题 `== 'Airi'` 或 pid 命中"双判据，并把这一轮看到的顶层窗口原样打出来 ——
    否则下次还是只有一句没信息量的 FAIL。
+
+
+
+## 第六轮：点击/拖拽回归 —— 颜色键整窗鼠标穿透，路线整体弃用
+
+用户报：**"点击没反应，也不能拖动"**（v0.3.3 之后）。本轮全部用可数判据定位。
+
+### 1) 功能探针（`probe_input6.py`，真发鼠标事件）
+
+点一下数"变化像素"（气泡 ≈上千，噪声几十），拖一下看 `GetWindowRect` 位移。
+逐点 `WindowFromPoint` 画出"哪些地方能点到"。
+
+### 2) 决定性证据（全部真窗/隔离实测）
+
+| 实验 | 结果 | 结论 |
+|---|---|---|
+| 隔离实验：干净 Form 赋 .NET `TransparencyKey`（`winbg_fix6.txt`） | `GetLayeredWindowAttributes` → `flags=LWA_ALPHA alpha=0` | alpha=0 = 不可见 + 全穿透，不是颜色键 |
+| 真窗 `AIRI_WIN_BG=key`：逐点 WindowFromPoint（`live_fix6.txt`） | 窗口内 8/8 采样点全部命中**桌面**（Program Manager） | **颜色键让 WebView2 内容整窗穿透** —— "看得见点不着"的机制 |
+| 手动 `SetLayeredWindowAttributes(LWA_COLORKEY,#010203)` 五种写法（`colorkey_test2.txt`） | 键色读回**全部 `#000000`** | 挖洞行为在本机不可控 |
+| 黑匣子（`_live6_*.log`） | `bridge ping FAIL "api 未就绪"` 且 `pywebviewready` 永不触发 | 探针环境下桥未注入（用户环境不受此限，见下） |
+
+### 3) 决策与修复（v0.3.4）
+
+1. **颜色键路线整体弃用**：`AIRI_WIN_BG` 默认 `key` → **`dark`**（只压黑底色，
+   完全不碰分层 —— 输入路径与 v0.3.2 一致）。
+2. `.NET` 属性访问全部 `BeginInvoke` 到 GUI 线程（WinForms 非线程安全；
+   `TransparencyKey` 内部 `RecreateHandle()`，后台线程调用有搞挂 GUI 的风险）。
+3. `collectUiRects()` pad 收窄到 1px、气泡尾巴单独成矩形 —— 细黑边替代块状白。
+4. **JS 黑匣子**：`window.onerror`/`unhandledrejection` 上报 + `WindowAPI.ping()`
+   桥自检。再出"点击没反应"，`[airi-js]` 日志能直接分辨页面崩 / 桥断 / 没命中。
+
+### 4) 探针环境的教训
+
+- 探针里 pywebview 6.2.1 透明模式的桥始终不注入（最小页面也复现，沙箱内外一致）；
+  用户环境（VS Code 启动）历史上桥是通的。**探针测不了桥时，别把"探针里桥死"
+  当成产品缺陷的证据，也别当成没缺陷的证据 —— 只能依赖用户侧黑匣子日志。**
+- 探针跑分时用户在打《鸣潮》：全屏游戏盖在桌宠上方，`WindowFromPoint` 全命中
+  游戏窗口、截图全黑。**真窗探针前先确认前台窗口。**
 
 
 
