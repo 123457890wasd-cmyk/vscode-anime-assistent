@@ -3,7 +3,7 @@
 > **Airi（愛莉）** — 一个傲娇的二次元桌宠，陪伴你在 VS Code 中写代码。
 > 她会监控你的 C/C++/Python 编译错误，用毒舌又暖心的方式吐槽你的 bug。
 
-当前版本：**v0.3.4**
+当前版本：**v0.3.5**
 
 > ⚠️ **素材版权**：本项目内置的 Live2D 模型 **不是本项目原创**，来自
 > [A8Chann/dsh-pet-live2d](https://github.com/A8Chann/dsh-pet-live2d)，许可为
@@ -442,13 +442,17 @@ Form 就保持 WinForms 默认的 `SystemColors.Control`，浅色主题下 = **`
 | `Airi` | 33×15.6 | 3 | 39×21.6 | **40×20** ✓ |
 | `online` | 37×14 | 3 | 43×20 | **44×20** ✓ |
 
-修法（v0.3.4 修订）：颜色键路线**已弃用** —— 真窗实测发现颜色键会让
+修法（v0.3.5 修订，黑边彻底消灭）：颜色键路线**已弃用** —— 真窗实测发现颜色键会让
 WebView2 内容**整窗鼠标穿透**（"看得见但点不着"，见 `live2d_probe/live_fix6.txt`：
 8/8 个采样点全部命中桌面），且 `.NET TransparencyKey` 属性会把窗口打成
 `alpha=0`（不可见 + 穿透，`winbg_fix6.txt`）。现在默认 **`dark`**：
 `fix_window_background()` 只把 Form 底色压黑（.NET 属性访问全部
-`BeginInvoke` 编组到 GUI 线程），同时 `collectUiRects()` 的 pad 收窄到 1px、
-气泡尾巴单独成矩形 —— pad 环露出的只剩一条细黑边，视觉上就是投影线。
+`BeginInvoke` 编组到 GUI 线程）。v0.3.4 曾用"pad 收窄到 1px"过渡，但方形
+region 撞上圆角元素、pad 环、半透明像素都会跟黑底混出**黑边**。v0.3.5
+双管齐下：`_apply_window_region` 升级为**同形状裁剪**（圆角矩形 +
+三角形尾巴，按 `border-radius` 逐像素对齐），同时 `ui.html` 的气泡/
+尾巴/缸壁/名牌板**全部改不透明绘制**，名牌由 `.pet-plate` 自己画板 ——
+region 里不再有"页面没画的像素"，黑边无从产生。
 `AIRI_WIN_BG=dark`（默认）/ `key`（opt-in 实验，本机会整窗穿透，勿用）/ `off`。
 
 真窗口 A/B（`live2d_probe/probe_live_fix5.py`，数据见 `live2d_probe/live_fix5.txt`）：

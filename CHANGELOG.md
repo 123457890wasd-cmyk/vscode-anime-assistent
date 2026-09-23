@@ -1,6 +1,35 @@
 # Change Log
 
-## [0.3.4] — 2026-09-23（未发布）
+## [0.3.5] — 2026-09-23（未发布）
+
+> 用户报："黑边又回来了"。第六轮的"最小 pad + 细黑边"是过渡方案，
+> 本轮把黑边**彻底**消灭：region 与页面绘制**同形状**，且页面全部不透明。
+
+### Fixed
+- **黑边根因**：dark 模式下 region 里凡页面没画的像素都露黑底 Form。
+  来源有三 —— ① 方形 region 撞上圆角元素，四角露出弧形黑缺角；
+  ② pad 环整圈露黑；③ 半透明像素（气泡 0.92、尾巴 0.45、缸壁 0.85）
+  跟黑底混出发暗。三个一起修：
+  - **region 同形状化**（`common._apply_window_region` 重写）：
+    支持圆角矩形（`CreateRoundRectRgn`）与多边形（`CreatePolygonRgn`），
+    按元素的 `border-radius` 逐像素对齐裁剪；纯矩形协议保持兼容。
+  - **页面绘制全部不透明化**（`ui.html`）：气泡底 `--bubble-bg` 改实色、
+    气泡渐变边框换算成不透明等效色、尾巴与气泡同色实色、缸壁 `#e4f6ff`
+    实色、box-shadow 改 inset（原外圈本来就被 region 裁掉）。
+  - **名牌改成真的板**：`.pet-plate` 包住名字/状态，不透明深蓝底 +
+    圆角 + 粉描边 —— 原来"黑方块"是 Form 底透出来的，现在由页面自己画。
+- **右键菜单被 region 裁成不可见**（顺带修掉的存量 bug）：菜单弹出/收起
+  现在都会重推窗口形状，`collectUiRects()` 含菜单矩形（rad=10）。
+- **package.json 的 UTF-8 BOM**（上一轮引入）：PS `Set-Content -Encoding
+  UTF8` 自带 BOM，扩展扫描器解析失败 → 调试宿主里整个扩展不加载，
+  状态栏按钮/命令全消失（commit `5b59dcb`）。`npm run compile` 实测
+  exit=0，IDE 里 16 个 TS 报错是 BOM 时代 tsserver 的缓存残留。
+
+### Verified
+- `verify_pet_ui` / `verify_silhouette_js` / `verify_click_region` /
+  py_compile 全部通过；UI 预览四变体重新生成。
+
+## [0.3.4] — 2026-09-23
 
 > 用户报回归："点击没反应、也不能拖动"。本轮把输入链路测成了数，
 > 找到两个**真窗口级别的硬伤**，并给前端装上了"黑匣子"。
