@@ -48,6 +48,8 @@
     /* ===== 气泡区域 ===== */
     .bubble-area {
       width: 100%; max-width: 264px;
+      flex-shrink: 0;   /* 空间不足时宁可溢出窗口（fitBubbles 会裁旧气泡），
+                           也绝不被 flex 压扁 —— 压扁就是把字揉在一起 */
       display: flex; flex-direction: column-reverse;
       align-items: center; gap: 7px;
       margin-bottom: 8px;
@@ -55,7 +57,8 @@
     }
     .bubble {
       position: relative; max-width: 100%;
-      padding: 8px 13px; border-radius: 14px;
+      flex-shrink: 0;   /* 同上：不许被压扁 */
+      padding: 9px 15px; border-radius: 14px;
       border: 1px solid transparent;
       background:
         linear-gradient(var(--bubble-bg), var(--bubble-bg)) padding-box,
@@ -68,7 +71,11 @@
          而窗口背后是桌面、不在这张合成图里 —— Chromium 会退化成给这层糊一块
          不透明的底，用户看到的就是对话框后面多一块浅色方块。
          气泡本身已经是 92% 不透明，这层模糊既看不出效果、又制造问题，故删除。 */
-      font-size: 12px; line-height: 1.55;
+      /* 排版（第九轮）：13px/1.7 + 0.5px 字距是中文气泡的可读下限，
+         12px 挤在一起显得局促。max-height 是兜底——超长回复最多显示约 5 行，
+         宁可在气泡自己的圆角内截断，也不能让气泡顶出窗口上沿被切。 */
+      font-size: 13px; line-height: 1.7; letter-spacing: 0.5px;
+      max-height: 132px; overflow: hidden;
       white-space: pre-wrap; word-break: break-word;
       text-align: center;
       animation: popUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -131,6 +138,7 @@
     .character-wrapper {
       display: flex; flex-direction: column;
       align-items: center; gap: 2px;
+      flex-shrink: 0;   /* 气泡变高时立绘不许被压扁 */
       cursor: grab; padding: 6px;
       border-radius: 16px; transition: background 0.25s;
     }
@@ -690,7 +698,10 @@
     var statusLabel = document.getElementById('statusLabel');
     var petArea = document.getElementById('petArea');
     var contextMenu = document.getElementById('contextMenu');
-    var MAX_BUBBLES = 3;
+    /* 第九轮：3 → 2。窗口一共 443px 高，气泡区只有 ~150px 空间，
+       三条气泡必然把最旧的一条顶出窗口上沿 —— 被窗口边缘横向切开，
+       用户看到的就是"字被揉在一起"（截图里上方那个碎气泡）。 */
+    var MAX_BUBBLES = 2;
     var currentEmotion = 'idle';
     var emotionTimer = null;
 
@@ -947,9 +958,25 @@
       if (bubbles.length >= MAX_BUBBLES) {
         removeBubble(bubbles[0]);
       }
-      var remaining = bubbleArea.querySelectorAll('.bubble:not([data-removing])');
-      if (remaining.length >= 2) {
-        remaining[remaining.length - 2].classList.add('old');
+    }
+
+    // 最新的之外全部标旧（降低透明度+微缩）。必须在**追加新气泡之后**调 ——
+    // 旧实现放在 append 之前，pruneBubbles 刚删完只剩一条时永远标不上。
+    function markOldBubbles() {
+      var bs = bubbleArea.querySelectorAll('.bubble:not([data-removing])');
+      for (var i = 0; i < bs.length - 1; i++) bs[i].classList.add('old');
+    }
+
+    // 气泡区顶边不许越过视口顶（留 6px 呼吸）。超了就从最旧的开始**立刻**移除
+    // （不走 450ms 渐隐，等不起）—— 绝不让窗口边缘把气泡文字横向切成两截。
+    // 只剩一条时不再裁，交给 .bubble 自身的 max-height 兜底。
+    function fitBubbles() {
+      var guard = 0;
+      while (guard++ < 6) {
+        if (bubbleArea.getBoundingClientRect().top >= 6) return;
+        var bs = bubbleArea.querySelectorAll('.bubble:not([data-removing])');
+        if (bs.length <= 1) return;
+        bs[0].remove();
       }
     }
 
@@ -970,7 +997,14 @@
       var el = document.createElement('div');
       el.className = isError ? 'bubble error' : 'bubble';
       el.dataset.created = Date.now();
+      // 先把**整段**文字放进去量出最终高度：打字机逐字显示时盒子高度保持不变，
+      // 旧气泡不会被一路往上顶（用户截图里"互动过程很难看"的另一半原因）。
+      el.textContent = text;
       bubbleArea.appendChild(el);
+      fitBubbles();
+      markOldBubbles();
+      el.style.height = el.offsetHeight + 'px';   // 锁定高度再清空打字
+      el.textContent = '';
       typeText(el, text);
       // 轻推角色
       charBox.style.animation = 'none';
