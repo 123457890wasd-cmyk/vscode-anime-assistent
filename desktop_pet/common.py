@@ -347,6 +347,82 @@ class _RECT(ctypes.Structure):
                 ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
 
 
+# --- 宿主 Form 的底色（第五轮找到的"块状白"真正来源）------------------------
+#
+# pywebview 的 winforms.py:286-292 在 transparent=True 时只做了两件事：
+#     self.SetStyle(WinForms.ControlStyles.SupportsTransparentBackColor, True)
+#     self.browser.DefaultBackgroundColor = Color.Transparent
+# **它没有给 Form.BackColor 赋值** —— 走透明分支时那句
+# `self.BackColor = ColorTranslator.FromHtml(window.background_color)` 在 else 里，
+# 于是 Form 保持 WinForms 的默认底色 SystemColors.Control（浅色主题 = #F0F0F0）。
+#
+# WebView2 那层确实是透明的，但"透明"露出来的是**这张浅灰底**。
+# 平时看不到，是因为窗口被 region 裁成了 DOM 元素的形状 —— region 之外整个
+# 窗口被剪掉，显出来的是桌面。而 region 的矩形是 DOM 盒**加了 pad** 的
+# （见 ui.html collectUiRects），那一圈 pad 环里页面什么都没画 ⇒ 浅灰底露出来。
+#
+# 用户截图里的三块"白"因此全部对得上（第五轮实测，见 live2d_probe/README.md）：
+#     气泡  : DOM 盒 212x36.6 + pad5 -> 222x46.6   截图实测 222x46   ✓
+#     Airi  : DOM 盒  33x15.6 + pad3 ->  39x21.6   截图实测  40x20   ✓
+#     online: DOM 盒  37x14   + pad3 ->  43x20     截图实测  44x20   ✓
+#
+# 修法：把 Form 底色设成**一个画面上不会出现的颜色**，同时拿这个颜色当
+# TransparencyKey —— WinForms 会据此走 LWA_COLORKEY，把"页面没画"的像素
+# 真正挖成洞（桌面透出来，而且那些像素自动点穿）。
+# 第三轮试过 LWA_COLORKEY 说"挖不掉底色"，原因是**键色猜错了**：
+# 当时用 #202020（深色）去挖 #F0F0F0（浅灰）的底，自然一像素都不动。
+#
+# AIRI_WIN_BG:
+#   key   默认。底色=键色=#010203，真挖洞
+#   dark  只把底色压成近黑，不打洞（挖不动时的退路，至少不刺眼）
+#   off   完全不动（A/B 用）
+FORM_BG_KEY = (1, 2, 3)
+WIN_BG_MODES = ('key', 'dark', 'off')
+
+
+def win_bg_mode():
+    v = os.environ.get('AIRI_WIN_BG', '').strip().lower()
+    return v if v in WIN_BG_MODES else 'key'
+
+
+def fix_window_background(window):
+    """把宿主 Form 的浅灰底压掉/挖掉，返回 (ok, detail)。
+
+    不动的后果：窗口 region 里凡是页面没画的像素都是 #F0F0F0 的浅灰，
+    表现为气泡/名牌/名字周围一圈"块状白"。详见上面那段长注释。
+    """
+    mode = win_bg_mode()
+    if mode == 'off':
+        return (False, 'AIRI_WIN_BG=off（不动底色）')
+    form = _get_form(window)
+    if form is None:
+        return (False, 'no form')
+    try:
+        before = str(form.BackColor)
+    except Exception:
+        before = '?'
+    try:
+        from System.Drawing import Color
+        rgb = FORM_BG_KEY if mode == 'key' else (0, 0, 0)
+        col = Color.FromArgb(rgb[0], rgb[1], rgb[2])
+        form.BackColor = col
+        hole = 'no'
+        if mode == 'key':
+            # TransparencyKey 会顺手装上 WS_EX_LAYERED + LWA_COLORKEY；
+            # 之后页面里任何**恰好等于键色**的像素也会变成洞 —— 这就是把
+            # 键色选成 #010203 而不是黑/白的原因：画面上不可能出现这个色。
+            form.TransparencyKey = col
+            hole = 'yes'
+        try:
+            now = str(form.BackColor)
+        except Exception:
+            now = '?'
+        return (True, 'backdrop=%s -> %s hole=%s key=#%02X%02X%02X'
+                % (before, now, hole, rgb[0], rgb[1], rgb[2]))
+    except Exception as e:                     # 锦上添花，绝不因此起不来
+        return (False, 'set failed: %s' % e)
+
+
 def _apply_window_region(window, rects, vw, vh):
     """按前端上报的矩形重建窗口 region。
 
