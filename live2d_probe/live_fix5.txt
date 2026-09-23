@@ -1,0 +1,25 @@
+==========================================================================
+第五轮 live 验证：pad 环里的浅灰底 = 块状白；挖洞能不能真挖掉
+==========================================================================
+判读： off 那次的"浅灰底像素"若为几百~上千 ⇒ 复现成功；
+       key 那次若≈0 且"与桌面一致"接近 100% ⇒ Form 底色已真被挖掉。
+
+--- AIRI_WIN_BG=off  pid=39568 ---
+  hwnd=0x00120B02 284x441 at (2220,840)
+  截图: 浅灰底像素 4894 (3.91% of 125244)  亮像素(均值>=200) 13222 (10.56%)
+  top: #FFFFFF 1.13%  #F0F0F0 0.95%  #91AAB5 0.91%  #0D1216 0.69%
+  log: [13:07:51] [airi-dwm] Mica backdrop disabled (hwnd=0x120b02 backdrop=2->1 set=True guarded=True)
+  log: [13:08:01] [airi-winbg] WARNING: 没能处理 Form 底色（AIRI_WIN_BG=off（不动底色））—— 气泡/名牌周围可能还会有一圈浅色方块
+  与桌面一致 = 52.41%
+  外部 LWA_COLORKEY 对照：取键色 #FFFFFF（实测底色）
+  SetLayeredWindowAttributes -> 1  浅灰像素 4894 -> 3157
+  与桌面一致 52.41% -> 35.58%
+
+--- AIRI_WIN_BG=key  pid=36424 ---
+  hwnd=0x000B0AC8 284x441 at (2220,840)
+  截图: 浅灰底像素 2081 (1.66% of 125244)  亮像素(均值>=200) 9090 (7.26%)
+  top: #FFFFFF 1.03%  #8DA7B0 0.71%  #87A1AC 0.68%  #8FA8B0 0.60%
+  log: [13:08:21] [airi-dwm] Mica backdrop disabled (hwnd=0xb0ac8 backdrop=2->1 set=True guarded=True)
+  log: [13:08:21] [airi-winbg] Form 底色处理完毕 [key] backdrop=Color [Control] -> Color [A=255, R=1, G=2, B=3] hole=yes key=#010203
+  与桌面一致 = 79.28%
+
