@@ -3,7 +3,7 @@
 > **Airi（愛莉）** — 一个傲娇的二次元桌宠，陪伴你在 VS Code 中写代码。
 > 她会监控你的 C/C++/Python 编译错误，用毒舌又暖心的方式吐槽你的 bug。
 
-当前版本：**v0.3.6**
+当前版本：**v0.3.7**
 
 > ⚠️ **素材版权**：本项目内置的 Live2D 模型 **不是本项目原创**，来自
 > [A8Chann/dsh-pet-live2d](https://github.com/A8Chann/dsh-pet-live2d)，许可为
