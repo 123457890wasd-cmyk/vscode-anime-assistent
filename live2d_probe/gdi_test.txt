@@ -1,0 +1,6 @@
+python: 3.13.14 (main, Jun 11 2026, 04:04:46) [MSC v.1944 64 bit (AMD64)]
+gdi32 handle: 140735113134080
+gdi32.CreateRectRgn OK: <_FuncPtr object at 0x0000024F3B0AA750>
+call OK handle=0x7504148E
+gdi32.CreateRoundRectRgn OK
+user32.CreateRectRgn FAIL(预期): function 'CreateRectRgn' not found

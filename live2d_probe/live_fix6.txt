@@ -9,37 +9,36 @@
     无 move_window-> 拖拽链路断在 JS/桥
 
 ==========================================================================
-AIRI_WIN_BG=dark   pid=40936
+AIRI_WIN_BG=dark   pid=28912
 ==========================================================================
-  窗口 284x441 at (2220,840)  hwnd=0x130C80
+  窗口 285x443 at (2220,840)  hwnd=0xF0BAA
   [窗口层]
     exstyle=0x00050008  WS_EX_LAYERED=False
     GetLayeredWindowAttributes 失败（窗口不是分层窗口？）
   [逐点 WindowFromPoint]  (fr = 窗口内相对百分比)
-    (0.50,0.55) -> pet   root=pet hwnd=0x270B28
-    (0.50,0.45) -> pet   root=pet hwnd=0x270B28
-    (0.50,0.62) -> pet   root=pet hwnd=0x270B28
-    (0.42,0.52) -> pet   root=pet hwnd=0x270B28
-    (0.58,0.52) -> pet   root=pet hwnd=0x270B28
-    (0.50,0.90) -> pet   root=pet hwnd=0x270B28
-    (0.50,0.70) -> pet   root=pet hwnd=0x270B28
-    (0.06,0.06) -> pet   root=pet hwnd=0x270B28
-    其中属于桌宠的点: 8 / 8
+    (0.50,0.55) -> other   hwnd=0x120CF4 cls=WindowsForms10.Window.8.app.0.aec740_r28_ad1 title='Airi'
+    (0.50,0.45) -> other   hwnd=0x120CF4 cls=WindowsForms10.Window.8.app.0.aec740_r28_ad1 title='Airi'
+    (0.50,0.62) -> other   hwnd=0x120CF4 cls=WindowsForms10.Window.8.app.0.aec740_r28_ad1 title='Airi'
+    (0.42,0.52) -> other   hwnd=0x120CF4 cls=WindowsForms10.Window.8.app.0.aec740_r28_ad1 title='Airi'
+    (0.58,0.52) -> other   hwnd=0x120CF4 cls=WindowsForms10.Window.8.app.0.aec740_r28_ad1 title='Airi'
+    (0.50,0.90) -> other   hwnd=0x120CF4 cls=WindowsForms10.Window.8.app.0.aec740_r28_ad1 title='Airi'
+    (0.50,0.70) -> other   hwnd=0x120CF4 cls=WindowsForms10.Window.8.app.0.aec740_r28_ad1 title='Airi'
+    (0.06,0.06) -> pet   root=pet hwnd=0xC0A34
+    其中属于桌宠的点: 1 / 8
   [点击测试] 真发左键，看角色有没有反应（变化像素 > 800 算有反应）
-    点 (0.50,0.55) -> 变化像素 0  
-    点 (0.50,0.45) -> 变化像素 0  
-    点 (0.50,0.62) -> 变化像素 0  
-    点 (0.42,0.52) -> 变化像素 0  
-    点 (0.58,0.52) -> 变化像素 0  
-    点 (0.50,0.90) -> 变化像素 0  
-    点 (0.50,0.70) -> 变化像素 0  
     点 (0.06,0.06) -> 变化像素 0  
     结论: **点击完全没反应**
   [拖拽测试] 按住 -> 分 10 步移动 -> 松开，看窗口有没有跟着走
     窗口 (2220,840) -> (2220,840)   位移 = (0,0)  **拖拽没反应**
   [.airi-pet.log 留痕]
-    [14:25:15] [airi-live2d] live2d ENABLED
-    [14:25:16] [airi-dwm] Mica backdrop disabled (hwnd=0x130c80 backdrop=2->1 set=True guarded=True)
-    [14:25:16] [airi-winbg] Form 底色处理完毕 [dark] backdrop=Color [Control] -> Color [A=255, R=0, G=0, B=0] hole=no key=#000000 
+    [17:29:54] [airi-live2d] live2d ENABLED
+    [17:29:55] [airi-dwm] Mica backdrop disabled (hwnd=0xd0a00 backdrop=2->1 set=True guarded=True)
+    [17:29:55] [airi-winbg] Form 底色处理完毕 [dark] backdrop=Color [Control] -> Color [A=255, R=0, G=0, B=0] hole=no key=#000000 
+    [17:29:55] [airi-js] bridge ping FAIL {"ok": false, "at": "immediate", "err": "api 未就绪"}
+    [17:29:55] [airi-standalone] Desktop pet connected
     --- region 最后 3 条 ---
+    ...（省略 3 条）
+    [17:30:11] [airi-region] region #229 EXCEPTION AttributeError("function 'CreateRectRgn' not found")
+    [17:30:16] [airi-region] region #230 EXCEPTION AttributeError("function 'CreateRectRgn' not found")
+    [17:30:22] [airi-region] region #231 EXCEPTION AttributeError("function 'CreateRectRgn' not found")
 

@@ -1,0 +1,5 @@
+pywebview ?
+form OK handle=1182258
+apply -> {'ok': True, 'rects': 4, 'meta': {'hwnd': '0x120a32', 'client': '405x608', 'scale': '1.4211,1.3725', 'kept': 4, 'bbox': '28,41,369,590'}}
+GetWindowRgn type=3 bbox=(28,41,369,589)
+VERDICT: PASS
