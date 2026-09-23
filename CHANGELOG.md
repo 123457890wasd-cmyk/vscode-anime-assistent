@@ -1,5 +1,124 @@
 # Change Log
 
+## [0.3.2] — 2026-09-23（未发布）
+
+> `package.json` 同时从 `0.2.4` 补到 `0.3.2` —— 之前它落后 CHANGELOG 两个版本
+> （0.3.0 / 0.3.1 都已写好但没同步），在 VS Code 里看版本号会以为是旧版。
+
+### Fixed
+- **透明窗口上"块状白"的三个成因，逐个拆掉**（用户第三次反馈，这次从像素上量清楚了）：
+  1. **`.bubble` / `.context-menu` 的 `backdrop-filter` 删除** —— 透明窗口上没有"背后"
+     可模糊，Chromium 会退化成给这一层糊一块不透明的底。气泡本身是圆角的，
+     而这块底是矩形，于是**从圆角四角露出来**，正是用户说的"角色上方的对话框也有这情况"。
+     气泡本来就有 92% 不透明的底色，这层模糊既看不出效果、又只制造问题。
+  2. **`.pet-name` 的 `filter: drop-shadow()` 删除** —— 这个名字用的是
+     `background-clip: text` + `color: transparent` 做渐变字，"文字裁剪层"再叠一个
+     `filter` 会多出一层独立合成层，透明底上这层的底可能没被清成透明。
+  3. **全局 `-webkit-font-smoothing: antialiased` / `-moz-osx-font-smoothing: grayscale`** ——
+     次像素（ClearType）抗锯齿要求底不透明；页面底透明时，文字的栅格化缓冲区会被
+     按不透明处理，出来就是"与文字同宽的一个方块"。
+     另外删掉了 `.bubble.old` 的 `filter: saturate(0.6)`（同类风险，且被 `opacity:0.45` 盖过）。
+- **取证方式**：`_analyze_blocks.py` 对用户截图做连通域分析，把"白"分成两类 ——
+  DOM 画的规则矩形（矩形度 0.798、`rgb(241,228,233)`、正好盖住 `.pet-name`+`.pet-status`）、
+  和模型自带美术（矩形度 0.4~0.6，如白书桌板 0.573）。**只有前者是 bug**。
+- ⚠️ **诚实边界**：`probe_ui_blocks.py` 用真 Chrome 逐条 CSS 做 A/B（去 `filter` / 去
+  `backdrop-filter` / 不用 `background-clip:text` / 两两组合），**五个变体都不画那块底** ——
+  即 headless Chrome 复现不出这个现象，**上述三条修复是按机制推断的，不是在 Chrome 里看着它消失的**。
+  需要重启桌宠后目视确认（旧进程 pid 44164 跑的还是老代码）。
+
+### Added
+- **角色底板 `AIRI_CARD`**（把散开的碎白拢成一张干净的卡）：
+  `off` / `tight` / `square`（默认）/ `frame` / `all`，详解与五联对比图见
+  `live2d_probe/README.md` 第四轮 + `live2d_probe/ui_cards.png`
+  - 位置来自 canvas alpha 的**实测外接框**（137×124 @ `[85,209,222,333]`），
+    不是写死的 `.character-box` 160×210 —— 那比角色大一圈，"最小"就落在这里
+  - **采样 6 次取并集后锁定**：模型一直 idle（呼吸/微摆），外接框每次都差几像素，
+    卡跟着变就是每 500ms 抖一下，比白边难看得多
+  - 底板必须**并进窗口形状**（`collectUiRects()` 里 `pairs.push([charCard, 0])`），
+    否则实心卡会被 region 裁掉，表现成"卡只显示一部分"
+  - `z-index: 0` 落在 canvas（`z-index: 1`）之下、`pointer-events: none` 不吃拖拽，
+    并且**只在 Live2D 就绪后**显示（图片兜底时 z-index:0 会盖住 `#charImg`）
+  - `all` 是**兜住不确定性**用的：名牌那块白复现不出、也就无法保证修掉，
+    并进白卡之后即使还在也看不见
+- **`pushSilhouette()` 结构拆分**：原来是 `if (!SILHOUETTE || !live2d.ready) return;`。
+  底板要的是"角色在哪儿"，跟"要不要异形窗口"是两件事，拆成先判 `live2d.ready`、
+  再更新底板、最后才判 `SILHOUETTE` —— 这样关掉点穿也能有底板。
+
+### Changed
+- `verify_click_region.py` 断言 31 → 39
+- **断言改为先剥 CSS 注释再查**：本轮"删代码 + 写注释说明为什么删"的写法会让
+  `'backdrop-filter:' not in UI` 把注释判成违规（注释里就写着这行曾经存在），
+  于是**修得越认真越 FAIL**。断言要查的是生效的 CSS，不是散文。
+- `verify_silhouette_js.py` 首次读 alpha 加了**重试**（20×150ms）：`live2d.ready` 一翻真
+  就 `readPixels`，那一帧可能还没画进 framebuffer，读回全 0 → 轮廓空 → 26 条断言里 6 条 FAIL。
+  三个脚本连着跑时必现、单独重跑立刻 26/26 全过，**这 6 条 FAIL 全是假的**。
+  结果文件新增 `轮廓读重试 : N 次`，用来区分"真坏"和"这一眼没看准"。
+
+## [0.3.1] — 2026-09-22（未发布）
+
+### Fixed
+- **窗口不是透明的（真正根因：DWM 的 Mica 背景材质）**：
+  pywebview 的 `BrowserForm.update_title_bar_theme()` 在**系统深色模式**下会执行
+  `DwmSetWindowAttribute(hwnd, 38, 2)`（`DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_MAINWINDOW`），
+  给窗口装上一层 Mica；浅色模式下它设的是 `1`（`DWMSBT_NONE`），所以**不装**。
+  Mica 由 DWM 绘制、**不在窗口的 GDI 重定向表面里**，于是：
+  `SetWindowRgn` 返回成功但屏幕一像素不裁、`LWA_COLORKEY` 返回成功但挖不掉，
+  只有整窗 `LWA_ALPHA` 动得了它。
+  这也解释了两张截图的颜色差异 —— 浅色 `#F0F0F0` / 深色 `#202020`
+  （`SystemColors.Control` 恰好也是这两个值，所以上一轮误判成"宿主 Form 底色"）。
+  修复：`common.disable_window_backdrop()` 把 backdrop 设回 `NONE`，
+  并把 `form.update_title_bar_theme` 包一层，防止**切系统主题时 Mica 被重新装回去**；
+  调用点 `webview.start(_after_window_ready)`（Form 是 start 内部才创建的，所以轮询等它出现）。
+  **实测（用户真实窗口 + 屏幕 BitBlt）**：关 Mica 前窗口与桌面一致 `0.00%`，
+  关掉后 `90.49%`，改回又 `0.00%`。取证见 `live2d_probe/live_fix4.txt`、`probe_live_fix4.py`
+- **上一轮"改 use `SetWindowRgn` 实现透明"的结论是错的**：region 只影响**鼠标命中**，
+  不改变画面（WebView2 走 DirectComposition 合成，父窗口 region 裁不到它）。
+  上一轮判据用的是 `GetWindowRgn` 返回值 —— **API 读回成功 ≠ 屏幕上生效**。
+  已把 region 的定位改成"点穿"，画面透明交给 Mica 修复
+- **气泡出现时没有强制刷新窗口形状**：`setTimeout(pushSilhouette, 0)` 按规范是
+  **不带参数**调用的，所以 `force` 一直是 `undefined`。改成
+  `setTimeout(function() { pushSilhouette(true); }, 0)`，与"气泡消失"那条路径一致
+
+### Changed
+- 日志新增 `[airi-dwm] Mica backdrop disabled (hwnd=... backdrop=2->1 set=True guarded=True)`，
+  一行就能看出当时读到的 backdrop、改成什么、防重复包装是否装上
+- `live2d_probe/` 新增一整类**活窗口取证**脚本（不重启桌宠、直接对用户正在跑的窗口做实验）：
+  `probe_live_window.py` / `probe_live_alpha.py` / `probe_live_fix2.py` / `probe_live_fix3.py` /
+  `probe_live_fix4.py` / `probe_verify_fix.py` / `probe_bridge.py` / `find_webview.py`
+- `verify_click_region.py` 断言 29 → 31（把两条查"已删代码"的陈旧断言换成新契约），
+  并修掉 `GetPixel` 未声明 `argtypes` 导致的 64 位句柄 `OverflowError`
+
+## [0.3.0] — 2026-09-22（未发布）
+
+### Added
+- **Live2D 角色**：DS鲸鱼娘模型替代静态立绘，会呼吸、随机眨眼、按情绪切表情。
+  素材在 `desktop_pet/assets/live2d/`，启动时由 `live2d_assets.py` 自检
+- **窗口形状裁剪（点穿）**：页面从渲染结果的 alpha 通道提轮廓（角色 + 气泡 + 名字 + 状态条），
+  每 500 ms 上报给 Python，由 `SetWindowRgn` 裁出窗口形状 —— 形状之外的鼠标点击落到下层窗口。
+  ⚠️ **画面透明不靠它**，见 0.3.1
+- **点击角色说话**：按 alpha 命中判定 + 头/身体/桌面三区分配，各给不同台词与情绪；
+  与拖拽共用 `mousedown`，移动超过 5 px 只算拖拽；防抖 600 ms
+- 环境变量 `AIRI_SILHOUETTE=0` 关闭形状裁剪（与 `AIRI_LIVE2D` 相互独立，
+  立绘/CSS 角色同样适用）
+- 环境变量 `AIRI_CUBISM_CORE` / `AIRI_ASSET_PORT` 见 README
+- `live2d_probe/` 验证沙盒：端到端渲染、形状裁剪/点击、静态服务器、扩展启动条件复刻
+
+### Changed
+- **废掉 `create_temp_html()`，改本地静态服务器**：窗口指向 `http://127.0.0.1:<port>/`。
+  `file://` 下 WebView2 会对 fetch/XHR 一律 CORS 拦截，`model3.json` 的闭包（57 文件）
+  一个都取不到；同源 HTTP 一次解决，顺带绕开 WebView2 对本地磁盘脚本的路径白名单
+- **Cubism Core 运行时自动抓取 + 校验**：`live2dcubismcore.min.js` 是专有运行时、
+  不入库，首次启动从官方 CDN 抓取并缓存；带浏览器 UA（裸请求返回 403）+ 长度与符号校验
+- **`handle_error()` 覆盖**：静态服务器与 standalone 服务器的 `ConnectionResetError` /
+  `BrokenPipeError` 不再打成一整段 traceback（客户端关窗/刷新是正常收尾路径）
+- `standalone.py` 启动日志新增 `live2d ...` / `silhouette ON|OFF` 行，
+  用于排查"为什么降级/为什么没裁剪形状"
+
+### Fixed
+- 轮廓为空或全部被裁光时**拒绝应用** region，避免窗口退化成零面积
+- ⚠️ 本版本原本声称"用 `SetWindowRgn` 解决了透明"，**该结论已被 0.3.1 推翻并修正**：
+  region 不改变画面。0.3.0 未发布，此处保留记录以免以后重蹈覆辙
+
 ## [0.2.4] — 2026-09-19
 
 ### Fixed
