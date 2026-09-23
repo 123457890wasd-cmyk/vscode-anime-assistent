@@ -61,6 +61,9 @@ def main():
     api = WindowAPI()
     # 点击互动只在 standalone.py（当前入口）接线；这里是旧入口，保持最小改动
     api.set_region_enabled(sil)
+    # 但"点击/拖拽到底走到哪一层"必须留痕：这里没接 click handler，
+    # 留痕能让"点了没反应"一眼看出是前端没命中还是本入口没接线。
+    api.set_input_logger(lambda m: print(f'[airi-input] {m}', flush=True))
 
     window = webview.create_window(
         title='Airi',

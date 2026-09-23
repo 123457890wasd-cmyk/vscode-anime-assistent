@@ -264,6 +264,20 @@ class AiriHandler(BaseHTTPRequestHandler):
                     # 前端上报的轮廓诊断：桥/尺寸/alpha 读数是否可信，全靠这条
                     p = msg.get('payload') or {}
                     log('[airi-sil] %s' % json.dumps(p, ensure_ascii=False))
+                elif kind == 'jsError':
+                    # JS 黑匣子：前端任何未捕获错误都会落到这里。
+                    # 没有它，"点击/拖拽/region 全部失明"时分不清是页面崩了
+                    # 还是窗口层断了 —— 现在页面崩了会直接写出错误原文。
+                    p = msg.get('payload') or {}
+                    log('[airi-js] ERROR %s' % json.dumps(p, ensure_ascii=False))
+                elif kind == 'bridgePing':
+                    p = msg.get('payload') or {}
+                    if p.get('ok'):
+                        log('[airi-js] bridge ping OK (at=%s pid=%s)'
+                            % (p.get('at'), p.get('pid')))
+                    else:
+                        log('[airi-js] bridge ping FAIL %s'
+                            % json.dumps(p, ensure_ascii=False))
             except Exception as exc:
                 log(f'[airi-standalone] /event parse failed: {exc!r}')
             self._json_response({'status': 'ok'})
@@ -372,6 +386,9 @@ def main():
     # 异形窗口必须留痕：这条链路跨 JS -> pywebview 桥 -> ctypes -> Win32 四层，
     # 任何一层断了以前都是静默的（用户只看到"窗口还是个方块"）。
     api.set_region_logger(lambda m: log(f'[airi-region] {m}'))
+    # 点击/拖拽同样必须留痕：用户报"点了没反应"时，日志里至少要能看出
+    # 是前端没命中（没有 pet_click）还是桥/后端断了。
+    api.set_input_logger(lambda m: log(f'[airi-input] {m}'))
     window = webview.create_window(title='Airi', url=page_url, width=win_w, height=win_h, x=x, y=y, frameless=True, transparent=True, on_top=True, resizable=False, easy_drag=False, js_api=api)
     api.set_window(window)
     if _backend_available:

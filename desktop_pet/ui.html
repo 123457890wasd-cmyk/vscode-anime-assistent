@@ -632,6 +632,32 @@
     var SSE_URL = 'http://127.0.0.1:' + PORT + '/events';
     var EVENT_URL = 'http://127.0.0.1:' + PORT + '/event';
 
+    // ============ JS 黑匣子：任何前端错误都上报宿主日志 ============
+    // 第六轮教训：用户报"点击没反应、也拖不动"时，前端到底活着没有完全不可知
+    // —— region / pet_click / move_window 三条链零留痕，分不清是
+    //    (a) 页面 JS 在启动中途崩了（后续全部不执行）
+    //    (b) 事件根本没进页面（窗口层穿透）
+    //    (c) 桥断了（事件到了，api 调用回不来）
+    // 有了这条上报，(a) 会直接把错误原文写进 .airi-pet.log。
+    function reportJS(kind, detail) {
+      try {
+        fetch(EVENT_URL, { method: 'POST',
+                           headers: { 'Content-Type': 'application/json' },
+                           body: JSON.stringify({ type: kind, payload: detail })
+                         }).catch(function() {});
+      } catch (e) {}
+    }
+    window.onerror = function(msg, src, line, col) {
+      reportJS('jsError', { where: 'onerror', message: String(msg),
+                            src: String(src || ''), line: line || 0, col: col || 0 });
+      return false;
+    };
+    window.addEventListener('unhandledrejection', function(e) {
+      var r = e.reason;
+      reportJS('jsError', { where: 'unhandledrejection',
+                            message: String((r && r.message) || r) });
+    });
+
     // DOM
     var bubbleArea = document.getElementById('bubbleArea');
     var charBox = document.getElementById('charBox');
@@ -1089,19 +1115,31 @@
       var out = [];
       var pairs = [];
       // pad 是给 region 留的余量。region 只做鼠标点穿，但它的矩形是"DOM 盒 + pad"，
-      // 那一圈 pad 环里页面什么都没画 —— 早先这里就是**块状白的来源**：
-      // 环里露出的是宿主 Form 的底色（WinForms 默认 #F0F0F0）。
-      // 现在 Form 底色被设成了颜色键并开了 TransparencyKey（见 common.py
-      // fix_window_background()），环里的像素会被真挖成洞 ⇒ 不可见。
-      // 所以 pad 可以放心留大一点，改善点击手感。
-      var PAD_BUBBLE = 8;   // ⚠️ 必须 >= .bubble::after 尾巴伸出的 7px，否则尾巴被裁掉
-      var PAD_NAME = 4;
+      // 那一圈 pad 环里页面什么都没画 —— 露出的是宿主 Form 的底色，
+      // 早先 Form 是 #F0F0F0 时这就是**块状白**的来源。
+      // 第六轮结论（见 common.py fix_window_background 的长注释）：颜色键路线
+      // 已弃用 —— .NET TransparencyKey 会把窗口打成 alpha=0（不可见+穿透），
+      // 手动 LWA_COLORKEY 的键色在这台 Windows 上读回恒 0（不可控），而且
+      // 颜色键作用在 GDI 表面上，很可能让 WebView2 的 DirectComposition 内容
+      // 整体鼠标穿透（"看得见点不着"）。
+      // 所以现在默认 dark 模式（Form 底色压黑），pad 收窄到 1px：
+      // 细黑边视觉上就是一条投影线，不再是块状白。
+      var PAD = 1;
       var bubbles = bubbleArea.querySelectorAll('.bubble');
-      for (var i = 0; i < bubbles.length; i++) pairs.push([bubbles[i], PAD_BUBBLE]);
+      for (var i = 0; i < bubbles.length; i++) {
+        var rb = bubbles[i].getBoundingClientRect();
+        if (rb.width < 1 || rb.height < 1) continue;
+        out.push([rb.left - PAD, rb.top - PAD, rb.right + PAD, rb.bottom + PAD]);
+        // 气泡尾巴单独成矩形：14x7 的三角形画在盒外 bottom:-7px 处。
+        // 以前靠"整盒 pad=8"把它包进来，代价是整条 8px 的 pad 带露底色；
+        // 现在只给尾巴自己一个小矩形，露底面积只剩它四个角的 ~2px 黑点。
+        var cx = (rb.left + rb.right) / 2;
+        out.push([cx - 9, rb.bottom, cx + 9, rb.bottom + 9]);
+      }
       var nm = document.querySelector('.pet-name');
       var st = document.querySelector('.pet-status');
-      if (nm) pairs.push([nm, PAD_NAME]);
-      if (st) pairs.push([st, PAD_NAME]);
+      if (nm) pairs.push([nm, PAD]);
+      if (st) pairs.push([st, PAD]);
       // 角色底板是一张**实心卡**，必须并进窗口形状 —— 否则它会被 region 裁掉，
       // 表现成"卡只显示一部分"的怪样子。它已经是纯矩形，不用再加内边距。
       if (charCard && document.body.classList.contains('card-on')) {
@@ -1450,6 +1488,28 @@
     connectSSE();
     initLive2D();
     startSilhouetteLoop();
+
+    // ============ 桥自检：证明 JS -> pywebview -> Python 这条路通不通 ============
+    // pywebview.api 是异步注入的：可能在脚本执行时就绪，也可能晚一点
+    // （触发 pywebviewready 事件）。两头都试，哪头先通走哪头。
+    function bridgeSelfTest(tag) {
+      try {
+        var api = window.pywebview && window.pywebview.api;
+        if (!api || !api.ping) {
+          reportJS('bridgePing', { ok: false, at: tag, err: 'api 未就绪' });
+          return;
+        }
+        Promise.resolve(api.ping()).then(function(res) {
+          reportJS('bridgePing', { ok: !!(res && res.ok), at: tag, pid: res && res.pid });
+        }, function(err) {
+          reportJS('bridgePing', { ok: false, at: tag, err: String(err) });
+        });
+      } catch (e) {
+        reportJS('bridgePing', { ok: false, at: tag, err: String(e) });
+      }
+    }
+    bridgeSelfTest('immediate');
+    window.addEventListener('pywebviewready', function() { bridgeSelfTest('pywebviewready'); });
   </script>
 </body>
 </html>
