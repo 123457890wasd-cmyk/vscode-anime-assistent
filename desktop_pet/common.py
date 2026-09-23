@@ -25,6 +25,7 @@ import ctypes
 import os
 import sys
 import threading
+import time
 import urllib.parse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -76,6 +77,30 @@ class WindowAPI:
         self._region_log = None        # 宿主注入的日志函数（standalone 写进 .airi-pet.log）
         self._region_state = None      # 上次 (ok, why)，用于只在状态变化时打日志
         self._region_calls = 0
+        self._input_log = None         # 点击/拖拽留痕，见 set_input_logger()
+        self._click_calls = 0
+        self._move_calls = 0
+
+    def set_input_logger(self, fn):
+        """宿主注入日志函数：fn(str) —— 给「点击互动 / 拖拽」这条链路留痕。
+
+        为什么必须留痕（第六轮教训）：用户报"点击没反应、也拖不动"时，**整条链路
+        一句日志都没有** —— 前端 mousedown 有没有触发、桥有没有把调用送过来、
+        pet_click 有没有真的被调到，全都看不见，只能猜。
+        这条链路跨 JS -> pywebview 桥 -> Python 三层，和 region 那条一样必须每层留痕。
+
+        注意 move_window 是**每帧**被调的，所以只记第一次 + 每 60 次一条，
+        否则日志会被刷爆（刷爆的日志等于没有日志）。
+        """
+        self._input_log = fn
+
+    def _log_input(self, msg):
+        if self._input_log is None:
+            return
+        try:
+            self._input_log(msg)
+        except Exception:
+            pass
 
     def set_region_logger(self, fn):
         """宿主注入日志函数：fn(str)。
@@ -98,17 +123,36 @@ class WindowAPI:
     def set_window(self, window):
         self._window = window
 
+    def ping(self):
+        """桥自检：前端启动时调一次，能返回就说明 JS->pywebview->Python 通了。
+
+        第六轮教训：这条链路一断，点击/拖拽/region 三条链**同时**失明，
+        而日志里一行痕迹都没有 —— 因为留痕的代码全在"链路正常才会被调"
+        的方法里。ping 是唯一一个不依赖任何交互就会被打的方法。
+        """
+        self._log_input('ping -> ok')
+        return {'ok': True, 'pid': os.getpid()}
+
     def get_position(self):
         if self._window is None:
+            self._log_input('get_position -> no window')
             return [0, 0]
-        return [self._window.x or 0, self._window.y or 0]
+        pos = [self._window.x or 0, self._window.y or 0]
+        self._log_input('get_position -> %s' % pos)
+        return pos
 
     def move_window(self, x, y):
-        if self._window is not None:
-            try:
-                self._window.move(int(x), int(y))
-            except Exception:
-                pass
+        if self._window is None:
+            self._move_calls += 1
+            self._log_input('move_window x%d -> no window' % self._move_calls)
+            return
+        self._move_calls += 1
+        if self._move_calls == 1 or self._move_calls % 60 == 0:
+            self._log_input('move_window #%d -> (%s,%s)' % (self._move_calls, x, y))
+        try:
+            self._window.move(int(x), int(y))
+        except Exception as exc:
+            self._log_input('move_window FAILED %r' % (exc,))
 
     def exit_app(self):
         """销毁窗口并退出进程（webview.start 返回后主线程结束，daemon 线程随之退出）"""
@@ -135,12 +179,22 @@ class WindowAPI:
 
         前端只在**真的点到角色像素上**时才调这里（用 canvas alpha 判定），
         所以这里不必再管命中，只管取词。
+
+        ⚠️ 因此：**日志里没有 pet_click，就说明前端认为你没点到角色**
+        （alphaAt() < 24 就静默 return），而不是台词库坏了 —— 这两件事
+        以前完全分不开，只能猜。
         """
+        self._click_calls += 1
         try:
             if self._click_handler is not None:
                 text, emotion = self._click_handler(str(zone or 'body'))
+                self._log_input('pet_click #%d zone=%s -> %r'
+                                % (self._click_calls, zone, (text or '')[:18]))
                 return {'text': text or '', 'emotion': emotion or 'idle'}
+            self._log_input('pet_click #%d zone=%s -> NO HANDLER'
+                            % (self._click_calls, zone))
         except Exception as exc:
+            self._log_input('pet_click #%d FAILED %r' % (self._click_calls, exc))
             print(f'[airi-common] click handler failed: {exc!r}')
         return {'text': '', 'emotion': 'idle'}
 
@@ -366,23 +420,102 @@ class _RECT(ctypes.Structure):
 #     Airi  : DOM 盒  33x15.6 + pad3 ->  39x21.6   截图实测  40x20   ✓
 #     online: DOM 盒  37x14   + pad3 ->  43x20     截图实测  44x20   ✓
 #
-# 修法：把 Form 底色设成**一个画面上不会出现的颜色**，同时拿这个颜色当
-# TransparencyKey —— WinForms 会据此走 LWA_COLORKEY，把"页面没画"的像素
-# 真正挖成洞（桌面透出来，而且那些像素自动点穿）。
-# 第三轮试过 LWA_COLORKEY 说"挖不掉底色"，原因是**键色猜错了**：
-# 当时用 #202020（深色）去挖 #F0F0F0（浅灰）的底，自然一像素都不动。
+# 修法（v0.3.4 修订）：把 Form 底色压成**近黑**，pad 环收窄到 1px ——
+# 细黑边视觉上是一条投影线，不再是块状白。
+#
+# ⚠️ 第六轮的教训：颜色键（挖洞）路线在这台机器上**不可用**，三条证据：
+#   1. 隔离实验（live2d_probe/winbg_fix6.txt）：给 Form 赋 .NET 的
+#      TransparencyKey 属性，GetLayeredWindowAttributes 读回
+#      flags=LWA_ALPHA alpha=0 —— 不是 LWA_COLORKEY！alpha=0 的分层窗口
+#      = 完全不可见 + 对鼠标完全穿透（"点击没反应、也拖不动"）。
+#   2. 绕开 .NET 用 ctypes 直接 SetLayeredWindowAttributes(LWA_COLORKEY)：
+#      调用返回成功、flags 也对，但**键色读回恒为 #000000**（五种写法全试过，
+#      见 live2d_probe/colorkey_test2.txt）。键色存不进去 = 挖洞行为不可控。
+#   3. 颜色键的鼠标命中判定作用在窗口的 GDI 表面上，而 WebView2 的画面走
+#      DirectComposition —— 不在 GDI 表面里。键控之后鼠标判定很可能认为
+#      "整个窗口都是键色"→ 整窗穿透，表现成"看得见但点不着"。
+#      （第五轮的 A/B 只验证了画面，没验证输入，漏掉了这一层。）
 #
 # AIRI_WIN_BG:
-#   key   默认。底色=键色=#010203，真挖洞
-#   dark  只把底色压成近黑，不打洞（挖不动时的退路，至少不刺眼）
+#   dark  默认。只把 Form 底色压黑，不碰分层 —— 输入路径与 v0.3.2 完全一致
+#   key   opt-in 实验：底色=键色=#010203 + ctypes 打颜色键（在本机不可控，勿依赖）
 #   off   完全不动（A/B 用）
 FORM_BG_KEY = (1, 2, 3)
 WIN_BG_MODES = ('key', 'dark', 'off')
 
+_WS_EX_LAYERED = 0x00080000
+_GWL_EXSTYLE = -20
+_LWA_COLORKEY = 0x2
+_LWA_ALPHA = 0x1
+
+# 这三个调用必须带全 argtypes —— 第六轮实测：不带的时候
+# SetLayeredWindowAttributes 打出去的键色会变成 #000000（读回证实），
+# 黑键会把模型画里所有纯黑像素都挖成洞。声明齐了读回才是 #030201。
+_user32 = ctypes.WinDLL('user32')
+_user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_user32.GetWindowLongW.restype = ctypes.c_long
+_user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+_user32.SetWindowLongW.restype = ctypes.c_long
+_user32.SetLayeredWindowAttributes.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
+                                               ctypes.c_ubyte, ctypes.c_uint32]
+_user32.SetLayeredWindowAttributes.restype = ctypes.c_int
+_user32.GetLayeredWindowAttributes.argtypes = [ctypes.c_void_p,
+                                               ctypes.POINTER(ctypes.c_uint32),
+                                               ctypes.POINTER(ctypes.c_ubyte),
+                                               ctypes.POINTER(ctypes.c_uint32)]
+_user32.GetLayeredWindowAttributes.restype = ctypes.c_int
+_user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+                                 ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                 ctypes.c_uint]
+_user32.SetWindowPos.restype = ctypes.c_int
+
 
 def win_bg_mode():
     v = os.environ.get('AIRI_WIN_BG', '').strip().lower()
-    return v if v in WIN_BG_MODES else 'key'
+    # 默认 dark：颜色键路线在本机不可控（见上面的长注释），宁可细黑边也别
+    # 冒"整窗不可见/穿透"的险。
+    return v if v in WIN_BG_MODES else 'dark'
+
+
+def _apply_colorkey(hwnd, rgb):
+    """绕开 .NET，直接给顶层窗口打 LWA_COLORKEY。返回 (ok, detail)。
+
+    detail 里带**读回的**分层状态 —— SetLayeredWindowAttributes 返回 1
+    只代表调用成功，不代表状态就是我们要的（第六轮的 .NET 属性就是这么骗人的）。
+    """
+    try:
+        key = rgb[0] | (rgb[1] << 8) | (rgb[2] << 16)
+        ex = _user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
+        if not (ex & _WS_EX_LAYERED):
+            _user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, ex | _WS_EX_LAYERED)
+            # 样式变更必须用 SetWindowPos(SWP_FRAMECHANGED) 强制生效，
+            # 否则紧接着的 SetLayeredWindowAttributes 会"返回成功但状态没落"
+            # （第六轮实测：键色读回 #000000，正确值应是 #030201）。
+            SWP_NOSIZE = 0x1; SWP_NOMOVE = 0x2; SWP_NOZORDER = 0x4
+            SWP_NOACTIVATE = 0x10; SWP_FRAMECHANGED = 0x20
+            _user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                                 SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER
+                                 | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+        ok = _user32.SetLayeredWindowAttributes(hwnd, key, 0, _LWA_COLORKEY)
+        # 读回验证
+        k = ctypes.c_uint32(0)
+        alpha = ctypes.c_ubyte(0)
+        flags = ctypes.c_uint32(0)
+        read_ok = _user32.GetLayeredWindowAttributes(
+            hwnd, ctypes.byref(k), ctypes.byref(alpha), ctypes.byref(flags))
+        keyed = bool(read_ok) and bool(flags.value & _LWA_COLORKEY)
+        alpha_on = bool(read_ok) and bool(flags.value & _LWA_ALPHA)
+        key_ok = keyed and (k.value & 0xFFFFFF) == key
+        detail = ('set=%s read=%s flags=%d key=#%06X alpha=%d %s'
+                  % (bool(ok), bool(read_ok), flags.value, k.value & 0xFFFFFF,
+                     alpha.value,
+                     'OK' if (key_ok and not alpha_on) else
+                     '!! 键色不对' if keyed else
+                     '!! ALPHA 也开着，整窗会被 alpha 混合' if alpha_on else
+                     '!! 颜色键没生效'))
+        return (key_ok and not alpha_on), detail
+    except Exception as e:
+        return (False, 'apply failed: %r' % (e,))
 
 
 def fix_window_background(window):
@@ -390,6 +523,16 @@ def fix_window_background(window):
 
     不动的后果：窗口 region 里凡是页面没画的像素都是 #F0F0F0 的浅灰，
     表现为气泡/名牌/名字周围一圈"块状白"。详见上面那段长注释。
+
+    ⚠️⚠️ 第六轮最大的教训（比颜色键本身更重要）：
+    本函数跑在 webview.start() 的**后台线程**里。WinForms 控件不是线程
+    安全的 —— v0.3.3 在这里直接给 form.BackColor / form.TransparencyKey
+    赋值，其中 TransparencyKey 内部会 UpdateStyles() -> RecreateHandle()，
+    跨线程重建窗口句柄直接把 GUI 线程搞挂：pywebview 之后的 JS 桥注入
+    （pywebviewready）永远不会完成 => 点击/拖拽/region 三条链**同时失明**
+    （用户报的回归就是这么来的；黑匣子证据：bridge ping FAIL "api 未就绪"
+    且 pywebviewready 永不触发，见 live2d_probe/_live6_off.log）。
+    所以一切 .NET 属性访问必须 BeginInvoke 编组到 GUI 线程执行。
     """
     mode = win_bg_mode()
     if mode == 'off':
@@ -397,30 +540,51 @@ def fix_window_background(window):
     form = _get_form(window)
     if form is None:
         return (False, 'no form')
+
+    box = {}
     try:
-        before = str(form.BackColor)
-    except Exception:
-        before = '?'
-    try:
-        from System.Drawing import Color
-        rgb = FORM_BG_KEY if mode == 'key' else (0, 0, 0)
-        col = Color.FromArgb(rgb[0], rgb[1], rgb[2])
-        form.BackColor = col
-        hole = 'no'
-        if mode == 'key':
-            # TransparencyKey 会顺手装上 WS_EX_LAYERED + LWA_COLORKEY；
-            # 之后页面里任何**恰好等于键色**的像素也会变成洞 —— 这就是把
-            # 键色选成 #010203 而不是黑/白的原因：画面上不可能出现这个色。
-            form.TransparencyKey = col
-            hole = 'yes'
-        try:
-            now = str(form.BackColor)
-        except Exception:
-            now = '?'
-        return (True, 'backdrop=%s -> %s hole=%s key=#%02X%02X%02X'
-                % (before, now, hole, rgb[0], rgb[1], rgb[2]))
-    except Exception as e:                     # 锦上添花，绝不因此起不来
-        return (False, 'set failed: %s' % e)
+        from System.Windows.Forms import MethodInvoker
+
+        def _work():
+            box['before'] = str(form.BackColor)
+            from System.Drawing import Color
+            rgb = FORM_BG_KEY if mode == 'key' else (0, 0, 0)
+            form.BackColor = Color.FromArgb(rgb[0], rgb[1], rgb[2])
+            box['now'] = str(form.BackColor)
+            box['rgb'] = rgb
+            try:
+                box['hwnd'] = int(form.Handle.ToInt64())
+            except Exception:
+                box['hwnd'] = 0
+
+        form.BeginInvoke(MethodInvoker(_work))
+        deadline = time.time() + 3
+        while 'now' not in box and time.time() < deadline:
+            time.sleep(0.05)
+    except Exception as e:
+        return (False, 'marshal failed: %r' % (e,))
+    if 'now' not in box:
+        return (False, 'GUI 线程 3s 内没执行底色设置（BeginInvoke 没被处理）')
+
+    rgb = box.get('rgb', (0, 0, 0))
+    hole = 'no'
+    detail2 = ''
+    ok = True
+    if mode == 'key':
+        # 注意：不碰 form.TransparencyKey（.NET 属性，会把窗口打成
+        # LWA_ALPHA alpha=0，见上面的长注释）。纯 ctypes 的 Win32 调用
+        # 是线程安全的，可以留在后台线程。
+        hwnd = box.get('hwnd') or 0
+        if hwnd:
+            hole_ok, detail2 = _apply_colorkey(hwnd, rgb)
+            hole = 'yes' if hole_ok else 'FAILED'
+            ok = hole_ok
+        else:
+            hole = 'FAILED no-hwnd'
+            ok = False
+    return (ok, 'backdrop=%s -> %s hole=%s key=#%02X%02X%02X %s'
+            % (box.get('before'), box.get('now'), hole,
+               rgb[0], rgb[1], rgb[2], detail2))
 
 
 def _apply_window_region(window, rects, vw, vh):
