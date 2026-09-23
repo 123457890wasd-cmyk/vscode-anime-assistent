@@ -26,3 +26,12 @@ Desktop.ini
 *.tmp
 *.log
 temp_*/
+
+# Live2D Cubism Core —— Live2D 专有运行时，**不可再分发**，绝不入库。
+# 运行时由 desktop_pet/live2d_assets.py:ensure_core() 自动抓取并缓存到此路径，
+# 所以排除它不影响开箱可用性（首次启动会自动下载，需联网）。
+desktop_pet/assets/live2d/vendor/live2dcubismcore.min.js
+
+# 桌宠启动诊断日志（每次启动重写）——扩展用 stdio:'ignore' 起桌宠，
+# 这是唯一能看到 Live2D 为何降级的途径，见 standalone.py:log()
+desktop_pet/.airi-pet.log
