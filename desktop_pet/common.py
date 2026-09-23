@@ -259,7 +259,9 @@ class WindowAPI:
                        int(vw), int(vh)))
             return res
         except Exception as exc:
-            self._log_region('region #%d EXCEPTION %r' % (self._region_calls, exc))
+            import traceback as _tb
+            self._log_region('region #%d EXCEPTION %r\n%s'
+                             % (self._region_calls, exc, _tb.format_exc()))
             return {'ok': False, 'why': repr(exc)}
 
 
@@ -626,10 +628,15 @@ def _apply_window_region(window, rects, vw, vh):
     user32.GetClientRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
     user32.SetWindowRgn.restype = ctypes.c_int
     user32.SetWindowRgn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
-    for fn, name in ((user32.CreateRectRgn, 'CreateRectRgn'),
+    for fn, name in ((gdi32.CreateRectRgn, 'CreateRectRgn'),
                      (gdi32.CreateRoundRectRgn, 'CreateRoundRectRgn'),
                      (gdi32.CreatePolygonRgn, 'CreatePolygonRgn')):
         fn.restype = ctypes.c_void_p
+    # ⚠️ CreateRectRgn / CreateRoundRectRgn / CreatePolygonRgn / CombineRgn
+    # 全是 **gdi32.dll** 的导出，只有 SetWindowRgn / GetClientRect 在 user32。
+    # 第八轮教训：写成 user32.CreateRectRgn 不会在 py_compile 报错，而是每次
+    # 运行时抛 AttributeError("function 'CreateRectRgn' not found")，
+    # region 一条都应用不上（probe 日志 region #155 EXCEPTion 即此）。
     gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_long] * 6
     gdi32.CreatePolygonRgn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
     gdi32.CombineRgn.restype = ctypes.c_int
@@ -656,7 +663,7 @@ def _apply_window_region(window, rects, vw, vh):
     def _clip_y(v):
         return max(0, min(ch, v))
 
-    h_total = user32.CreateRectRgn(0, 0, 0, 0)   # 空区域，逐块 RGN_OR 并进去
+    h_total = gdi32.CreateRectRgn(0, 0, 0, 0)   # 空区域，逐块 RGN_OR 并进去
     if not h_total:
         return {'ok': False, 'why': 'CreateRectRgn failed', 'meta': meta}
     kept = 0
@@ -701,7 +708,7 @@ def _apply_window_region(window, rects, vw, vh):
                             h_piece = gdi32.CreateRoundRectRgn(
                                 l, t, r, b, ew, eh)
                         else:
-                            h_piece = user32.CreateRectRgn(l, t, r, b)
+                            h_piece = gdi32.CreateRectRgn(l, t, r, b)
                 else:
                     l = _clip_x(int(round(float(entry[0]) * sx)))
                     t = _clip_y(int(round(float(entry[1]) * sy)))
@@ -709,7 +716,7 @@ def _apply_window_region(window, rects, vw, vh):
                     b = _clip_y(int(round(float(entry[3]) * sy)))
                     if r <= l or b <= t:
                         continue
-                    h_piece = user32.CreateRectRgn(l, t, r, b)
+                    h_piece = gdi32.CreateRectRgn(l, t, r, b)
             except (TypeError, ValueError, IndexError, KeyError):
                 continue
             if not h_piece:
