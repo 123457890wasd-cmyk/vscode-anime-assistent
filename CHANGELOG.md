@@ -1,5 +1,42 @@
 # Change Log
 
+## [0.3.8] — 2026-09-23
+
+> 用户报："效果没改好，重改"（附截图：最新气泡的顶边被水平切掉一截，
+> 且两条气泡一分钟后仍未按 8 秒规则自动消失）。
+
+### 诊断（.airi-pet.log + 无头浏览器复现）
+- 气泡 8 秒自动消失靠 2s `setInterval`，截图时两条气泡已存在 ~40s 仍未消失
+  → **页面 JS 定时器停摆/被冻结**（全透明异形窗口易被 Chromium 可见性启发式
+  误判为后台页而节流）。
+- 定时器一死，500ms 的 region 轮询也死 → 窗口形状冻结在**最后一次推送**。
+  若最后一推落在气泡 popUp 动画进行中，`getBoundingClientRect` 量到的是
+  "位移+缩放"后的盒子（偏低十几像素）→ region 把最新气泡顶边永久裁掉一截。
+- Python 侧 region 日志只在状态变化时打印，"只有 region #1"属正常，
+  不能当"region 没跑"的依据。
+
+### Fixed
+- **region 不再吸收动画中途的过期矩形**：气泡增删时打点
+  `lastBubbleChangeAt`，周期轮询在 520ms 动画窗口内跳过推送；
+  `showBubble` 在动画第一帧之前（最终位置）推一次，动画结束 540ms 再确认一次。
+  就算之后页面被冻结，窗口形状也停在**正确**形状上。
+- **fitBubbles 单气泡兜底**：只剩一条仍溢出时，把它的 max-height 压到
+  可用高度，在气泡圆角内截断，绝不让窗口上沿切字（9 轮旧版此路直接 return）。
+- **气泡排序纠正**：`.bubble-area` column-reverse → column。appendChild 的
+  最新气泡现在落在最下、贴着角色，尾巴（朝下）指向角色而不是指着旧气泡；
+  溢出时被裁的是最旧的（在最上方）。
+
+### Changed
+- **禁用 WebView2 后台节流**：`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
+  加 `--disable-background-timer-throttling --disable-renderer-backgrounding
+  --disable-backgrounding-occluded-windows --disable-features=IntensiveWakeUpThrottling`，
+  治定时器停摆的根（透明窗口被误判后台页）。
+- **JS 心跳诊断链**：ui.html 每 2s 经桥调 `WindowAPI.pet_heartbeat()`；
+  Python 记录时间戳，region 调用与消息推送时发现心跳滞后 >3s 就写日志 ——
+  这条链路以前是完全静默的。
+- 新增探针 `live2d_probe/gen_ui_probe.py` / `check_ui_js.py`：无头 Edge
+  渲染 ui.html 验证气泡布局（自报矩形到页面内，截图即诊断）。
+
 ## [0.3.7] — 2026-09-23
 
 > 用户报："互动触发回复的时候字都揉在一起了"（附截图：上方一条碎气泡
