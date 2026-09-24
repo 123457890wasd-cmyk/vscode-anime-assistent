@@ -37,6 +37,33 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 # 屏幕
 # ---------------------------------------------------------------------------
 
+def clamp_to_virtual_screen(x, y, win_w, win_h, vs, margin=60):
+    """把窗口左上角钳制进虚拟桌面，保证至少 margin px 的窗口留在屏内。
+
+    防止把桌宠一路拖出屏幕后找不回来（只能重启）。vs=(vx0, vy0, vx1, vy1)
+    是虚拟桌面的物理边界（多显示器拼接后的总矩形）。
+    """
+    vx0, vy0, vx1, vy1 = vs
+    lo_x = vx0 - win_w + margin
+    hi_x = vx1 - margin
+    lo_y = vy0 - win_h + margin
+    hi_y = vy1 - margin
+    return (min(max(x, lo_x), hi_x), min(max(y, lo_y), hi_y))
+
+
+def get_virtual_screen():
+    """虚拟桌面边界 (vx0, vy0, vx1, vy1)，多显示器拼接的总矩形。失败返回 None。"""
+    try:
+        u = ctypes.windll.user32
+        vx0, vy0 = u.GetSystemMetrics(76), u.GetSystemMetrics(77)
+        cw, ch = u.GetSystemMetrics(78), u.GetSystemMetrics(79)
+        if cw <= 0 or ch <= 0:
+            return None
+        return (vx0, vy0, vx0 + cw, vy0 + ch)
+    except Exception:
+        return None
+
+
 def get_screen_size():
     """返回主屏幕分辨率 (width, height)。"""
     if sys.platform == 'win32':
@@ -169,6 +196,13 @@ class WindowAPI:
         if self._move_calls == 1 or self._move_calls % 60 == 0:
             self._log_input('move_window #%d -> (%s,%s)' % (self._move_calls, x, y))
         try:
+            # 拖拽钳制：至少留 60px 在虚拟桌面内，防止把桌宠拖出屏幕找不回来。
+            # 钳制失败（非 Windows/度量异常）就按原坐标移 —— 移动永远不能挂。
+            vs = get_virtual_screen()
+            if vs is not None:
+                win_w = int(getattr(self._window, 'width', 0) or 300)
+                win_h = int(getattr(self._window, 'height', 0) or 450)
+                x, y = clamp_to_virtual_screen(int(x), int(y), win_w, win_h, vs)
             self._window.move(int(x), int(y))
         except Exception as exc:
             self._log_input('move_window FAILED %r' % (exc,))
