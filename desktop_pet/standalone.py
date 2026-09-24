@@ -157,6 +157,8 @@ CLICK_LINES = {
 }
 
 
+_last_pick = {}   # zone -> 上次选中的下标（避免连点两句一样，2026-09-23 日志实锤 #9/#10 复读）
+
 def _pick_click_line(zone):
     """WindowAPI 的取词回调：返回 (台词, 情绪)。
 
@@ -164,7 +166,14 @@ def _pick_click_line(zone):
     生成回复的，点一下角色要的是**立刻**有反应，不该去碰网络/DEEPSEEK 那条路。
     """
     pool = CLICK_LINES.get(zone) or CLICK_LINES['body']
-    return random.choice(pool)
+    last = _last_pick.get(zone, -1)
+    if len(pool) > 1:
+        # 池里多于一句时，只从"不是上一句"的里面挑 —— 连点不复读
+        idx = random.choice([i for i in range(len(pool)) if i != last])
+    else:
+        idx = 0
+    _last_pick[zone] = idx
+    return pool[idx]
 
 # ---------------------------------------------------------------------------
 # HTTP 服务器
