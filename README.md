@@ -1,6 +1,6 @@
-# Airi Monitor (vscode-anime-assistent)
+# DS_Monitor     vs-deepseek-desktop-pet
 
-> **Airi（愛莉）** — 一个傲娇的二次元桌宠，陪伴你在 VS Code 中写代码。
+> deepseek鲸鱼娘在其它项目的支持下将作为一个傲娇的二次元桌宠，陪伴你在 VS Code 中写代码。
 > 她会监控你的 C/C++/Python 编译错误，用毒舌又暖心的方式吐槽你的 bug。
 
 当前版本：**v0.3.7**
