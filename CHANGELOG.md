@@ -1,5 +1,26 @@
 # Change Log
 
+## [0.3.9] — 2026-09-25
+
+> 用户请求：继续检查 bug 并修复（例行审计轮，无新用户报障；
+> 昨晚 50 分钟会话日志无 JS 报错、无心跳滞后 —— v0.3.8 冻结治理实测有效）。
+
+### Fixed
+- **拖拽屏幕边缘钳制**（common.py）：`move_window` 之前把窗口左上角钳进
+  虚拟桌面（多显示器拼接矩形，`GetSystemMetrics(76..79)`），保证至少 60px
+  留在屏内 —— 之前可以把桌宠一路拖出屏幕找不回来（只能重启）。
+  钳制失败时按原坐标移，移动永远不挂。纯函数 `clamp_to_virtual_screen`
+  单独可测，边界用例见 `live2d_probe/test_window_clamp.py`。
+- **右键菜单边缘收敛**（ui.html）：弹出前按菜单实测宽高 + 4px 呼吸收敛进
+  窗口 —— 之前贴边右键时菜单溢出窗口被 OS 裁掉一截（region 只含窗口内
+  部分，溢出块永远显示不出来）。
+
+### Verified
+- `clamp_to_virtual_screen` 9 组边界用例（四边出界 / 角落极限 / 双屏负坐标）
+  全过；`get_virtual_screen()` 真机返回双屏拼接矩形。
+- ui.html 主 script 块 node --check 通过；verify_pet_ui / verify_silhouette_js
+  （26/26）/ verify_click_region（系统 Python 3.12 + pywebview）全过。
+
 ## [0.3.8] — 2026-09-23
 
 > 用户报："效果没改好，重改"（附截图：最新气泡的顶边被水平切掉一截，
