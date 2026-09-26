@@ -1,5 +1,29 @@
 # Change Log
 
+## [0.3.10] — 2026-09-26
+
+> 用户请求：继续检查 bug 并修复 push（例行审计轮）。桌宠自 9-23 起未重启、
+> 无新运行时证据，审计深入到此前未覆盖的进程生命周期与 /push 分发链。
+
+### Audited（无问题）
+- 进程生命周期：当前无残留桌宠进程；双击状态栏的启动竞态由
+  「绑定失败 → ping 探测 → 已有实例 exit(0)」兜住（standalone.py main）。
+- extension.ts 诊断转发：15s 健康缓存、签名去重、all_clear 触发条件均正确。
+
+### Fixed
+- **all_clear 在无后端时被静默吞掉**（standalone.py /push）：`trigger`
+  形状的消息走 `generate_response` 分支，后端不可用时什么都不做——
+  diagnostics 分支有内置兜底台词，这条分支漏了。抽出
+  `_builtin_reply(error_count)` 供两分支共用，all_clear 现在也有
+  「哼，全部修好了…算你厉害。」的回应。
+- 注：你机器上 response_generator 可导入，实际走的是后端路径；
+  此修复保障后端缺失（换机/缺依赖）时的行为一致性。
+
+### Verified
+- `live2d_probe/test_push_e2e.py`：真 socket 起 HTTP 服务器线程，
+  真 POST 到 /push —— 场景 A（强制无后端）兜底台词精确匹配；
+  场景 B（真实后端）产出非空个性化回复。四项全过。
+
 ## [0.3.9] — 2026-09-25
 
 > 用户请求：继续检查 bug 并修复（例行审计轮，无新用户报障；
