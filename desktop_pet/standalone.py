@@ -175,6 +175,18 @@ def _pick_click_line(zone):
     _last_pick[zone] = idx
     return pool[idx]
 
+def _builtin_reply(error_count):
+    """后端（response_generator）不可用时的内置兜底台词。
+
+    diagnostics 与 trigger/all_clear 两条推送分支共用 —— 后者此前漏了兜底，
+    all_clear 在无后端时被静默吞掉（用户修好了 bug 却毫无反应）。
+    """
+    if error_count > 0:
+        push_message('errorAlert', f"喂！{error_count} 个错误！给我认真点检查！", 'angry')
+    else:
+        push_message('chatMessage', '哼，全部修好了…算你厉害。', 'happy')
+
+
 # ---------------------------------------------------------------------------
 # HTTP 服务器
 # ---------------------------------------------------------------------------
@@ -267,16 +279,14 @@ class AiriHandler(BaseHTTPRequestHandler):
                     if r:
                         push_message(r.get('type', 'chatMessage'), r.get('payload', {}).get('text', ''), r.get('payload', {}).get('emotion', 'idle'))
                 else:
-                    # 后端不可用时的内置兜底台词
-                    if ctx['error_count'] > 0:
-                        push_message('errorAlert', f"喂！{ctx['error_count']} 个错误！给我认真点检查！", 'angry')
-                    else:
-                        push_message('chatMessage', '哼，全部修好了…算你厉害。', 'happy')
+                    _builtin_reply(ctx['error_count'])
             elif 'trigger' in msg or 'error_count' in msg:
                 if _backend_available:
                     r = generate_response(msg)
                     if r:
                         push_message(r.get('type'), r.get('payload', {}).get('text', ''), r.get('payload', {}).get('emotion', 'idle'))
+                else:
+                    _builtin_reply(msg.get('error_count', 0))
             else:
                 push_message('chatMessage', msg.get('message', body), 'idle')
             self._json_response({'status': 'pushed'})
